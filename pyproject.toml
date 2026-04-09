@@ -1,0 +1,99 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kaos-nlp-transformers"
+dynamic = ["version"]
+description = "Dense embeddings and small-model inference for the Kelvin Agentic OS"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "LicenseRef-Proprietary" }
+authors = [
+    { name = "273 Ventures LLC", email = "it@273ventures.com" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "kaos-core>=0.1.0",
+    "kaos-content>=0.1.0",
+    "numpy>=2.0",
+    "fastembed>=0.6",
+]
+
+[project.optional-dependencies]
+# Heavy ML stack — only needed for zero-shot NLI and any model not in
+# fastembed's ONNX registry. Default is fastembed-only.
+torch = [
+    "torch>=2.5",
+    "transformers>=4.45",
+    "sentence-transformers>=5.0",
+]
+mcp = ["kaos-mcp>=0.1.0"]
+
+[project.scripts]
+kaos-nlp-transformers = "kaos_nlp_transformers.cli:main"
+kaos-nlp-transformers-serve = "kaos_nlp_transformers.serve:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.11.0",
+    "ty>=0.0.1a17",
+]
+
+[tool.hatch.version]
+path = "kaos_nlp_transformers/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/kaos_nlp_transformers",
+    "/README.md",
+    "/CLAUDE.md",
+    "/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kaos_nlp_transformers"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: end-to-end checks requiring network or model downloads",
+    "unit: focused unit checks",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
+ignore = ["B008", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["kaos_nlp_transformers"]
+
+[tool.ty.src]
+include = ["kaos_nlp_transformers", "tests"]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+kaos-core = { path = "../kaos-core", editable = true }
+kaos-content = { path = "../kaos-content", editable = true }
+kaos-mcp = { path = "../kaos-mcp", editable = true }

@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.so
+*.dylib
+dist/
+build/
+*.whl
+
+# Virtual environments
+/.venv/
+venv/
+
+# uv lockfile (pinned per-developer; not committed for editable workspace pkgs)
+uv.lock
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# HF model cache (if accidentally written under the package dir)
+.hf_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store

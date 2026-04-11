@@ -26,6 +26,7 @@ classifiers = [
 dependencies = [
     "kaos-core>=0.1.0",
     "kaos-content>=0.1.0",
+    "kaos-nlp-core>=0.1.0",
     "numpy>=2.0",
     "fastembed>=0.6",
 ]
@@ -96,4 +97,5 @@ package = true
 [tool.uv.sources]
 kaos-core = { path = "../kaos-core", editable = true }
 kaos-content = { path = "../kaos-content", editable = true }
+kaos-nlp-core = { path = "../kaos-nlp-core", editable = true }
 kaos-mcp = { path = "../kaos-mcp", editable = true }

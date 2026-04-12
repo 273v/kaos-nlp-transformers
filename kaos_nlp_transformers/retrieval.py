@@ -16,6 +16,7 @@ from collections import OrderedDict
 from typing import Any
 
 import numpy as np
+from kaos_nlp_core.retrieval.protocol import corpus_unit_passage_uri
 from kaos_nlp_core.search import SearchHit
 
 from kaos_nlp_transformers.embedding import EmbeddingModel
@@ -341,17 +342,12 @@ class EmbeddingRetriever:
             for unit in corpus:
                 doc_ids.append(unit.row)
                 texts.append(unit.text)
-                # Passage URI: doc_uri + block_ref
-                doc_uri = unit.doc_uri
-                block_ref = unit.block_ref
-                passage_uri = (
-                    f"{doc_uri}{block_ref}" if block_ref and "#" not in doc_uri else doc_uri
-                )
+                passage_uri = corpus_unit_passage_uri(unit)
                 external_ids.append(passage_uri)
                 metadata_list.append(
                     {
                         "doc_id": passage_uri,
-                        "doc_uri": doc_uri,
+                        "doc_uri": unit.doc_uri,
                         "page": unit.page,
                         "section_ref": unit.section_ref,
                         "section_title": unit.section_title,

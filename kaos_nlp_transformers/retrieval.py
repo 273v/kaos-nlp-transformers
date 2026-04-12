@@ -12,12 +12,54 @@ it implements lives in kaos-nlp-core.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
 
 import numpy as np
 from kaos_nlp_core.search import SearchHit
 
 from kaos_nlp_transformers.embedding import EmbeddingModel
+
+
+def _group_corpus_units_for_embedding(
+    corpus: Any, group_by: str
+) -> tuple[list[int], list[str], list[str | None], list[dict[str, Any]]]:
+    """Group CorpusUnits by an attribute for embedding retrieval.
+
+    Returns (doc_ids, texts, external_ids, metadata_list) where each
+    entry corresponds to one group.
+    """
+    groups: OrderedDict[str, list[Any]] = OrderedDict()
+    ungrouped_counter = 0
+    for unit in corpus:
+        value = getattr(unit, group_by)
+        if value is None:
+            key = f"{unit.doc_uri}#ungrouped-{ungrouped_counter}"
+            ungrouped_counter += 1
+        else:
+            key = f"{unit.doc_uri}#{value}"
+        groups.setdefault(key, []).append(unit)
+
+    doc_ids: list[int] = []
+    texts: list[str] = []
+    external_ids: list[str | None] = []
+    metadata_list: list[dict[str, Any]] = []
+    for idx, (key, units) in enumerate(groups.items()):
+        first = units[0]
+        grouped_text = "\n".join(u.text for u in units)
+        doc_ids.append(idx)
+        texts.append(grouped_text)
+        external_ids.append(key)
+        metadata_list.append(
+            {
+                "doc_id": key,
+                "doc_uri": first.doc_uri,
+                "page": first.page,
+                "section_ref": first.section_ref,
+                "section_title": first.section_title,
+            }
+        )
+    return doc_ids, texts, external_ids, metadata_list
 
 
 class EmbeddingRetriever:
@@ -69,10 +111,7 @@ class EmbeddingRetriever:
             )
             raise ValueError(msg)
         if embeddings.shape[0] != len(texts):
-            msg = (
-                f"embeddings rows ({embeddings.shape[0]}) must match "
-                f"texts length ({len(texts)})"
-            )
+            msg = f"embeddings rows ({embeddings.shape[0]}) must match texts length ({len(texts)})"
             raise ValueError(msg)
 
         # L2-normalize for cosine similarity via dot product
@@ -250,6 +289,7 @@ class EmbeddingRetriever:
         cls,
         corpus: Any,
         *,
+        group_by: str | None = None,
         model_id: str | None = None,
         batch_size: int = 32,
     ) -> EmbeddingRetriever:
@@ -262,6 +302,12 @@ class EmbeddingRetriever:
 
         Args:
             corpus: A ``kaos_ml_core.Corpus`` instance.
+            group_by: Optional attribute name on ``CorpusUnit`` to group
+                by before indexing (e.g. ``"section_ref"``).  When set,
+                units sharing the same attribute value are concatenated
+                into one document whose ``external_id`` is
+                ``{doc_uri}#{group_value}``.  The grouped text is
+                embedded (not individual units).
             model_id: Embedding model id.  Defaults to the registry
                 default (``BAAI/bge-small-en-v1.5``).
             batch_size: Batch size for embedding inference.
@@ -272,32 +318,53 @@ class EmbeddingRetriever:
             corpus = Corpus.from_documents([doc1, doc2])
             retriever = EmbeddingRetriever.from_corpus(corpus)
         """
-        from kaos_ml_core.features import embed_corpus
-
-        vecs = embed_corpus(corpus, model=model_id, batch_size=batch_size)
         em = EmbeddingModel.load(model_id)
 
-        doc_ids: list[int] = []
-        texts: list[str] = []
-        external_ids: list[str | None] = []
-        metadata_list: list[dict[str, Any]] = []
+        if group_by is not None:
+            doc_ids, texts, external_ids, metadata_list = _group_corpus_units_for_embedding(
+                corpus, group_by
+            )
+        else:
+            from kaos_ml_core.features import embed_corpus as _embed_corpus
 
-        for unit in corpus:
-            doc_ids.append(unit.row)
-            texts.append(unit.text)
-            # Passage URI: doc_uri + block_ref
-            doc_uri = unit.doc_uri
-            block_ref = unit.block_ref
-            passage_uri = f"{doc_uri}{block_ref}" if block_ref and "#" not in doc_uri else doc_uri
-            external_ids.append(passage_uri)
-            metadata_list.append({
-                "doc_id": passage_uri,
-                "doc_uri": doc_uri,
-                "page": unit.page,
-                "section_ref": unit.section_ref,
-                "section_title": unit.section_title,
-            })
+            vecs = _embed_corpus(corpus, model=model_id, batch_size=batch_size)
 
+            doc_ids: list[int] = []
+            texts: list[str] = []
+            external_ids: list[str | None] = []
+            metadata_list: list[dict[str, Any]] = []
+
+            for unit in corpus:
+                doc_ids.append(unit.row)
+                texts.append(unit.text)
+                # Passage URI: doc_uri + block_ref
+                doc_uri = unit.doc_uri
+                block_ref = unit.block_ref
+                passage_uri = (
+                    f"{doc_uri}{block_ref}" if block_ref and "#" not in doc_uri else doc_uri
+                )
+                external_ids.append(passage_uri)
+                metadata_list.append(
+                    {
+                        "doc_id": passage_uri,
+                        "doc_uri": doc_uri,
+                        "page": unit.page,
+                        "section_ref": unit.section_ref,
+                        "section_title": unit.section_title,
+                    }
+                )
+
+            return cls(
+                embeddings=vecs,
+                doc_ids=doc_ids,
+                texts=texts,
+                external_ids=external_ids,
+                metadata_list=metadata_list,
+                model=em,
+            )
+
+        # Embed grouped texts
+        vecs = em.embed(texts, batch_size=batch_size)
         return cls(
             embeddings=vecs,
             doc_ids=doc_ids,

@@ -20,6 +20,7 @@ from kaos_nlp_transformers.errors import (
     ModelNotRegisteredError,
 )
 from kaos_nlp_transformers.models import EXCLUDED, REGISTRY, RegisteredModel
+from kaos_nlp_transformers.retrieval import EmbeddingRetriever
 from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "BackendNotInstalledError",
     "EmbeddingError",
     "EmbeddingModel",
+    "EmbeddingRetriever",
     "KaosNLPTransformersError",
     "KaosNLPTransformersSettings",
     "ModelLoadError",

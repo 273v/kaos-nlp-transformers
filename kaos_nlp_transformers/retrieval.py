@@ -136,7 +136,7 @@ class EmbeddingRetriever:
         """Embedding dimensionality."""
         return self._embeddings.shape[1]
 
-    async def retrieve(self, query: str, top_k: int = 10) -> list[SearchHit]:
+    async def retrieve(self, query: str, top_k: int = 10, **kwargs: Any) -> list[SearchHit]:
         """Embed *query* and return the *top_k* most similar documents.
 
         Similarity is cosine similarity computed as a dot product over

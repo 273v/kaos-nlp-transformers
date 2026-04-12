@@ -245,5 +245,67 @@ class EmbeddingRetriever:
             batch_size=batch_size,
         )
 
+    @classmethod
+    def from_corpus(
+        cls,
+        corpus: Any,
+        *,
+        model_id: str | None = None,
+        batch_size: int = 32,
+    ) -> EmbeddingRetriever:
+        """Build an embedding retriever from a kaos-ml-core ``Corpus``.
+
+        Uses ``kaos_ml_core.features.embed_corpus`` for vectorization
+        (which in turn uses ``EmbeddingModel`` from this package).
+        Provenance is threaded from ``CorpusUnit`` fields into
+        ``external_id`` and ``metadata`` on each result.
+
+        Args:
+            corpus: A ``kaos_ml_core.Corpus`` instance.
+            model_id: Embedding model id.  Defaults to the registry
+                default (``BAAI/bge-small-en-v1.5``).
+            batch_size: Batch size for embedding inference.
+
+        Example::
+
+            from kaos_ml_core import Corpus
+            corpus = Corpus.from_documents([doc1, doc2])
+            retriever = EmbeddingRetriever.from_corpus(corpus)
+        """
+        from kaos_ml_core.features import embed_corpus
+
+        vecs = embed_corpus(corpus, model=model_id, batch_size=batch_size)
+        em = EmbeddingModel.load(model_id)
+
+        doc_ids: list[int] = []
+        texts: list[str] = []
+        external_ids: list[str | None] = []
+        metadata_list: list[dict[str, Any]] = []
+
+        for unit in corpus:
+            doc_ids.append(unit.row)
+            texts.append(unit.text)
+            # Passage URI: doc_uri + block_ref
+            doc_uri = unit.doc_uri
+            block_ref = unit.block_ref
+            passage_uri = f"{doc_uri}{block_ref}" if block_ref and "#" not in doc_uri else doc_uri
+            external_ids.append(passage_uri)
+            metadata_list.append({
+                "doc_id": passage_uri,
+                "doc_uri": doc_uri,
+                "page": unit.page,
+                "section_ref": unit.section_ref,
+                "section_title": unit.section_title,
+            })
+
+        return cls(
+            embeddings=vecs,
+            doc_ids=doc_ids,
+            texts=texts,
+            external_ids=external_ids,
+            metadata_list=metadata_list,
+            model=em,
+        )
+
 
 __all__ = ["EmbeddingRetriever"]

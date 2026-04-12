@@ -11,6 +11,7 @@ See ``docs/internal/prd/kaos-nlp-transformers.md`` and
 """
 
 from kaos_nlp_transformers._version import __version__
+from kaos_nlp_transformers.device import DeviceInfo, SystemDevices, detect_devices
 from kaos_nlp_transformers.embedding import EmbeddingModel
 from kaos_nlp_transformers.errors import (
     BackendNotInstalledError,
@@ -27,6 +28,7 @@ __all__ = [
     "EXCLUDED",
     "REGISTRY",
     "BackendNotInstalledError",
+    "DeviceInfo",
     "EmbeddingError",
     "EmbeddingModel",
     "EmbeddingRetriever",
@@ -35,5 +37,7 @@ __all__ = [
     "ModelLoadError",
     "ModelNotRegisteredError",
     "RegisteredModel",
+    "SystemDevices",
     "__version__",
+    "detect_devices",
 ]

@@ -25,6 +25,21 @@ class KaosNLPTransformersSettings(ModuleSettings):
     allow_unregistered: bool = False
     profile: str = "default"
 
+    device: str = "auto"
+    """Device for embedding inference.
+
+    Values: 'auto' (detect best available), 'cpu', 'cuda', 'cuda:0',
+    'cuda:1', 'mps', 'xla', 'openvino'. Default 'auto' selects the
+    best GPU if torch is installed with GPU support, otherwise CPU.
+    """
+
+    backend: str = "auto"
+    """Embedding backend preference.
+
+    Values: 'auto' (device-dependent), 'fastembed', 'sentence-transformers'.
+    Default 'auto' uses fastembed for CPU, sentence-transformers for GPU.
+    """
+
     model_config = SettingsConfigDict(
         env_prefix="KAOS_NLP_TRANSFORMERS_",
         env_file=".env",

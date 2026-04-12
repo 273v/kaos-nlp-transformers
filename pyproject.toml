@@ -32,13 +32,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Heavy ML stack — only needed for zero-shot NLI and any model not in
-# fastembed's ONNX registry. Default is fastembed-only.
+# PyTorch + sentence-transformers — required for GPU embedding and any
+# model not in fastembed's ONNX registry.
 torch = [
     "torch>=2.5",
     "transformers>=4.45",
     "sentence-transformers>=5.0",
 ]
+# ONNX Runtime GPU — NVIDIA CUDA acceleration for fastembed.
+# NOTE: onnxruntime-gpu conflicts with onnxruntime; install one or the other.
+gpu = ["onnxruntime-gpu>=1.19"]
+# Intel OpenVINO acceleration (CPU and Intel GPU).
+openvino = ["optimum[openvino]>=1.20"]
 mcp = ["kaos-mcp>=0.1.0"]
 
 [project.scripts]

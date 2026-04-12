@@ -325,9 +325,13 @@ class EmbeddingRetriever:
                 corpus, group_by
             )
         else:
-            from kaos_ml_core.features import embed_corpus as _embed_corpus
+            # Use Corpus.embed() if available (caches by model+batch_size).
+            if hasattr(corpus, "embed"):
+                vecs = corpus.embed(model=model_id, batch_size=batch_size)
+            else:
+                from kaos_ml_core.features import embed_corpus as _embed_corpus
 
-            vecs = _embed_corpus(corpus, model=model_id, batch_size=batch_size)
+                vecs = _embed_corpus(corpus, model=model_id, batch_size=batch_size)
 
             doc_ids: list[int] = []
             texts: list[str] = []

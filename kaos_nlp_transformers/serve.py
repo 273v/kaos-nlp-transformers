@@ -5,18 +5,14 @@ Full MCP server ships in Phase v1.3 with 3-5 tools.
 
 from __future__ import annotations
 
-import sys
 
-
-def main(argv: list[str] | None = None) -> int:
-    print(
-        "kaos-nlp-transformers MCP server is not implemented in v0. "
-        "It ships in Phase v1.3 — see "
-        "docs/internal/plans/kaos-nlp-transformers-v0.md.",
-        file=sys.stderr,
+def main(argv: list[str] | None = None) -> None:
+    raise SystemExit(
+        "kaos-nlp-transformers-serve is not yet implemented. "
+        "MCP tools for kaos-nlp-transformers are planned for Phase v1.3. "
+        "Use the Python API directly instead."
     )
-    return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

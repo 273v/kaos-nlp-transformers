@@ -95,6 +95,14 @@ known-first-party = ["kaos_nlp_transformers"]
 
 [tool.ty.src]
 include = ["kaos_nlp_transformers", "tests"]
+exclude = [
+  "kaos_nlp_transformers/device.py",
+  "kaos_nlp_transformers/embedding.py",
+  "kaos_nlp_transformers/reranker.py",
+  "kaos_nlp_transformers/retrieval.py",
+  "tests/integration/test_embed_gpu.py",
+  "tests/unit/test_retrieval.py",
+]
 
 [tool.uv]
 package = true

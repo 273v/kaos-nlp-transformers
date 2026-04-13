@@ -18,7 +18,9 @@ pytestmark = pytest.mark.unit
 
 
 def test_device_info_fields():
-    d = DeviceInfo(name="Test GPU", device="cuda:0", backend="sentence-transformers", memory_mb=16000)
+    d = DeviceInfo(
+        name="Test GPU", device="cuda:0", backend="sentence-transformers", memory_mb=16000
+    )
     assert d.name == "Test GPU"
     assert d.device == "cuda:0"
     assert d.backend == "sentence-transformers"
@@ -55,7 +57,9 @@ def test_system_devices_has_gpu():
 
 
 def test_system_devices_gpu_devices():
-    gpu0 = DeviceInfo(name="GPU0", device="cuda:0", backend="sentence-transformers", memory_mb=16000)
+    gpu0 = DeviceInfo(
+        name="GPU0", device="cuda:0", backend="sentence-transformers", memory_mb=16000
+    )
     gpu1 = DeviceInfo(name="GPU1", device="cuda:1", backend="sentence-transformers", memory_mb=8000)
     cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed")
     sys = SystemDevices(devices=(gpu0, gpu1, cpu))
@@ -81,8 +85,12 @@ def test_system_devices_cpu_device_fallback():
 def _make_system() -> SystemDevices:
     return SystemDevices(
         devices=(
-            DeviceInfo(name="Big GPU", device="cuda:0", backend="sentence-transformers", memory_mb=16000),
-            DeviceInfo(name="Small GPU", device="cuda:1", backend="sentence-transformers", memory_mb=8000),
+            DeviceInfo(
+                name="Big GPU", device="cuda:0", backend="sentence-transformers", memory_mb=16000
+            ),
+            DeviceInfo(
+                name="Small GPU", device="cuda:1", backend="sentence-transformers", memory_mb=8000
+            ),
             DeviceInfo(name="CPU", device="cpu", backend="fastembed"),
         ),
         onnx_providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
@@ -115,9 +123,7 @@ def test_resolve_cuda_indexed():
 
 
 def test_resolve_unavailable_raises():
-    sys = SystemDevices(
-        devices=(DeviceInfo(name="CPU", device="cpu", backend="fastembed"),)
-    )
+    sys = SystemDevices(devices=(DeviceInfo(name="CPU", device="cpu", backend="fastembed"),))
     with pytest.raises(ValueError, match="not available"):
         resolve_device("cuda:0", sys)
 

@@ -119,9 +119,7 @@ class CrossEncoderReranker:
             return []
 
         pairs = [(query, r.text) for r in results]
-        raw_scores = await asyncio.to_thread(
-            self._backend.predict, pairs, show_progress_bar=False
-        )
+        raw_scores = await asyncio.to_thread(self._backend.predict, pairs, show_progress_bar=False)
 
         # Sigmoid normalize to [0, 1]
         import numpy as np

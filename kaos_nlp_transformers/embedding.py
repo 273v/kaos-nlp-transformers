@@ -159,9 +159,7 @@ class EmbeddingModel:
         device_info = resolve_device(req_device)
 
         # --- Resolve backend ---
-        effective_backend = _resolve_backend(
-            req_backend, device_info, registered.backend
-        )
+        effective_backend = _resolve_backend(req_backend, device_info, registered.backend)
 
         # --- Load backend ---
         cache_dir = str(s.cache_dir) if s.cache_dir else None
@@ -260,9 +258,7 @@ class EmbeddingModel:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_backend(
-    requested: str, device: DeviceInfo, registry_backend: str
-) -> str:
+def _resolve_backend(requested: str, device: DeviceInfo, registry_backend: str) -> str:
     """Determine which backend to use given user preference and device.
 
     Returns 'fastembed' or 'sentence-transformers'.

@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import logging
 from functools import lru_cache
 from typing import Any
+
+from kaos_core.logging import get_logger
 
 from kaos_nlp_core.retrieval.protocol import RetrievalResult
 from kaos_nlp_core.retrieval.reranker import RankedResult
@@ -31,7 +32,7 @@ from kaos_nlp_transformers.device import DeviceInfo, resolve_device
 from kaos_nlp_transformers.errors import BackendNotInstalledError, ModelLoadError
 from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default reranker model — MIT license, 0.3B params, CPU-friendly.
 DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-base"

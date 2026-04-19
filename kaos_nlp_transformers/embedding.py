@@ -24,11 +24,11 @@ raise the same error unless ``allow_unregistered`` is set in settings.
 from __future__ import annotations
 
 import importlib
-import logging
 from functools import lru_cache
 from typing import Any
 
 import numpy as np
+from kaos_core.logging import get_logger
 
 from kaos_nlp_transformers.device import DeviceInfo, resolve_device
 from kaos_nlp_transformers.errors import (
@@ -40,7 +40,7 @@ from kaos_nlp_transformers.errors import (
 from kaos_nlp_transformers.models import EXCLUDED, REGISTRY, RegisteredModel
 from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EmbeddingModel:

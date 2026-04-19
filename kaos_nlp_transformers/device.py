@@ -10,11 +10,12 @@ probes the system; subsequent calls return the cached result.
 from __future__ import annotations
 
 import importlib
-import logging
 from dataclasses import dataclass
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from kaos_core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)

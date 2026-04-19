@@ -24,7 +24,6 @@ from functools import lru_cache
 from typing import Any
 
 from kaos_core.logging import get_logger
-
 from kaos_nlp_core.retrieval.protocol import RetrievalResult
 from kaos_nlp_core.retrieval.reranker import RankedResult
 

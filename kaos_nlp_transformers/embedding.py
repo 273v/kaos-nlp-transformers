@@ -23,6 +23,7 @@ raise the same error unless ``allow_unregistered`` is set in settings.
 
 from __future__ import annotations
 
+import importlib
 import logging
 from functools import lru_cache
 from typing import Any
@@ -345,7 +346,7 @@ def _load_sentence_transformers_cached(
     separate cached models.
     """
     try:
-        from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
+        sentence_transformers = importlib.import_module("sentence_transformers")
     except ImportError as exc:
         msg = (
             "sentence-transformers is not installed. "
@@ -360,6 +361,7 @@ def _load_sentence_transformers_cached(
         kwargs: dict[str, Any] = {"device": device}
         if cache_dir:
             kwargs["cache_folder"] = cache_dir
+        SentenceTransformer = sentence_transformers.SentenceTransformer
         return SentenceTransformer(model_id, **kwargs)
     except Exception as exc:
         msg = (

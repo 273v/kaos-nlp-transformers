@@ -19,6 +19,7 @@ Example::
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 from functools import lru_cache
 from typing import Any
@@ -142,7 +143,7 @@ class CrossEncoderReranker:
 def _load_cross_encoder_cached(model_id: str, device: str):
     """Process-wide cache of loaded cross-encoder backends."""
     try:
-        from sentence_transformers import CrossEncoder  # type: ignore[import-not-found]
+        sentence_transformers = importlib.import_module("sentence_transformers")
     except ImportError as exc:
         msg = (
             "sentence-transformers is not installed. "
@@ -153,6 +154,7 @@ def _load_cross_encoder_cached(model_id: str, device: str):
         raise BackendNotInstalledError(msg) from exc
 
     try:
+        CrossEncoder = sentence_transformers.CrossEncoder
         return CrossEncoder(model_id, device=device)
     except Exception as exc:
         msg = (

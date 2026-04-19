@@ -88,21 +88,12 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
-ignore = ["B008", "E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["kaos_nlp_transformers"]
 
 [tool.ty.src]
 include = ["kaos_nlp_transformers", "tests"]
-exclude = [
-  "kaos_nlp_transformers/device.py",
-  "kaos_nlp_transformers/embedding.py",
-  "kaos_nlp_transformers/reranker.py",
-  "kaos_nlp_transformers/retrieval.py",
-  "tests/integration/test_embed_gpu.py",
-  "tests/unit/test_retrieval.py",
-]
 
 [tool.uv]
 package = true

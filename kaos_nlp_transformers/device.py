@@ -9,8 +9,10 @@ probes the system; subsequent calls return the cached result.
 
 from __future__ import annotations
 
+import importlib
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ def _detect_torch_devices() -> list[DeviceInfo]:
     devices: list[DeviceInfo] = []
 
     try:
-        import torch
+        torch = importlib.import_module("torch")
     except ImportError:
         return devices
 
@@ -102,12 +104,12 @@ def _detect_torch_devices() -> list[DeviceInfo]:
 
     # XLA / TPU
     try:
-        import torch_xla.core.xla_model as xm  # type: ignore[import-not-found]
+        xm = importlib.import_module("torch_xla.core.xla_model")
 
-        xla_device = xm.xla_device()
+        xla_device = xm.xla_device()  # type: ignore[no-untyped-call]
         devices.append(
             DeviceInfo(
-                name=f"XLA ({xla_device.type})",
+                name=f"XLA ({getattr(xla_device, 'type', 'unknown')})",
                 device="xla",
                 backend="sentence-transformers",
             )
@@ -121,7 +123,7 @@ def _detect_torch_devices() -> list[DeviceInfo]:
 def _detect_onnx_providers() -> list[str]:
     """Return available ONNX Runtime execution providers."""
     try:
-        import onnxruntime as ort  # type: ignore[import-not-found]
+        ort: Any = importlib.import_module("onnxruntime")
 
         return list(ort.get_available_providers())
     except ImportError:

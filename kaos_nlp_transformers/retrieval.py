@@ -12,6 +12,7 @@ it implements lives in kaos-nlp-core.
 
 from __future__ import annotations
 
+import importlib
 from collections import OrderedDict
 from typing import Any
 
@@ -87,7 +88,7 @@ class EmbeddingRetriever:
         embeddings: np.ndarray,
         doc_ids: list[int],
         texts: list[str],
-        external_ids: list[str | None] | None = None,
+        external_ids: tuple[str | None, ...] | list[str | None] | list[str] | None = None,
         metadata_list: list[dict[str, Any]] | None = None,
         model: EmbeddingModel,
     ) -> None:
@@ -330,7 +331,8 @@ class EmbeddingRetriever:
             if hasattr(corpus, "embed"):
                 vecs = corpus.embed(model=model_id, batch_size=batch_size)
             else:
-                from kaos_ml_core.features import embed_corpus as _embed_corpus
+                features = importlib.import_module("kaos_ml_core.features")
+                _embed_corpus = features.embed_corpus
 
                 vecs = _embed_corpus(corpus, model=model_id, batch_size=batch_size)
 

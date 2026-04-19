@@ -5,6 +5,7 @@ Skipped when torch is not installed or CUDA is not available.
 
 from __future__ import annotations
 
+import importlib
 import os
 
 import numpy as np
@@ -15,7 +16,7 @@ pytestmark = pytest.mark.integration
 
 def _skip_if_no_gpu():
     try:
-        import torch
+        torch = importlib.import_module("torch")
 
         if not torch.cuda.is_available():
             pytest.skip("CUDA not available")
@@ -132,7 +133,7 @@ def test_explicit_device_selection():
     _skip_if_no_gpu()
     _skip_if_offline()
 
-    import torch
+    torch = importlib.import_module("torch")
 
     if torch.cuda.device_count() < 2:
         pytest.skip("need 2 GPUs for this test")
@@ -142,6 +143,8 @@ def test_explicit_device_selection():
     model0 = EmbeddingModel.load(device="cuda:0")
     model1 = EmbeddingModel.load(device="cuda:1")
 
+    assert model0.device is not None
+    assert model1.device is not None
     assert model0.device.device == "cuda:0"
     assert model1.device.device == "cuda:1"
     assert model0.device.name != model1.device.name or model0.device.device != model1.device.device
@@ -160,6 +163,7 @@ def test_force_cpu_ignores_gpu():
 
     model = EmbeddingModel.load(device="cpu")
     assert model.backend_name == "fastembed"
+    assert model.device is not None
     assert model.device.device == "cpu"
 
 

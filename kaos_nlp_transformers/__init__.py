@@ -20,7 +20,13 @@ from kaos_nlp_transformers.errors import (
     ModelLoadError,
     ModelNotRegisteredError,
 )
-from kaos_nlp_transformers.models import EXCLUDED, REGISTRY, RegisteredModel
+from kaos_nlp_transformers.models import (
+    EXCLUDED,
+    REGISTRY,
+    RERANKER_EXCLUDED,
+    RERANKER_REGISTRY,
+    RegisteredModel,
+)
 from kaos_nlp_transformers.reranker import CrossEncoderReranker
 from kaos_nlp_transformers.retrieval import EmbeddingRetriever
 from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
@@ -28,6 +34,8 @@ from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 __all__ = [
     "EXCLUDED",
     "REGISTRY",
+    "RERANKER_EXCLUDED",
+    "RERANKER_REGISTRY",
     "BackendNotInstalledError",
     "CrossEncoderReranker",
     "DeviceInfo",

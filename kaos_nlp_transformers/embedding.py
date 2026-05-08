@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import importlib
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any
 
@@ -166,37 +168,38 @@ class EmbeddingModel:
         # --- Load backend ---
         cache_dir = str(s.cache_dir) if s.cache_dir else None
 
-        # Audit-01 KNT-005: enforce offline mode at the boundary. Both
-        # fastembed and sentence-transformers route through huggingface_hub;
-        # setting the documented env vars makes them refuse network access
-        # and raise on missing local files instead of silently downloading.
-        # Set unconditionally each call (idempotent) so a settings change
-        # mid-process is honored.
-        if s.offline:
-            os.environ.setdefault("HF_HUB_OFFLINE", "1")
-            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-
-        if effective_backend == "sentence-transformers":
-            st_backend = _load_sentence_transformers_cached(
-                model_id=registered.model_id,
-                revision=registered.revision,
-                device=device_info.device,
-                cache_dir=cache_dir,
-            )
-            logger.info(
-                "Loaded %s @ %s via sentence-transformers on %s (%s)",
-                registered.model_id,
-                registered.revision,
-                device_info.device,
-                device_info.name,
-            )
-            return cls(
-                registered,
-                st_backend,
-                device=device_info,
-                backend_name="sentence-transformers",
-            )
-        else:
+        # Audit-02 KNT-103: scope HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE around
+        # the backend construction so a process-wide env var doesn't leak
+        # between two consecutive load() calls with different settings.offline
+        # values. The 0.1.0a1 setdefault approach was buggy on two counts:
+        #   1. setdefault refuses to override HF_HUB_OFFLINE=0 from the
+        #      caller's shell, silently ignoring offline=True;
+        #   2. once set to "1", it never reverted to "0" for subsequent
+        #      offline=False loads in the same process.
+        # The context manager snapshot/restores both vars even on backend
+        # exception, so a long-running server can safely flip offline policy
+        # per request.
+        with _offline_env_scope(s.offline):
+            if effective_backend == "sentence-transformers":
+                st_backend = _load_sentence_transformers_cached(
+                    model_id=registered.model_id,
+                    revision=registered.revision,
+                    device=device_info.device,
+                    cache_dir=cache_dir,
+                )
+                logger.info(
+                    "Loaded %s @ %s via sentence-transformers on %s (%s)",
+                    registered.model_id,
+                    registered.revision,
+                    device_info.device,
+                    device_info.name,
+                )
+                return cls(
+                    registered,
+                    st_backend,
+                    device=device_info,
+                    backend_name="sentence-transformers",
+                )
             # fastembed pins revisions in its own model registry and does not
             # accept a runtime revision override (audit-01 KNT-003). The cache
             # key still includes registered.revision so that a registry change
@@ -236,11 +239,16 @@ class EmbeddingModel:
 
         try:
             if self._backend_name == "sentence-transformers":
+                # normalize_embeddings=True keeps the sentence-transformers
+                # path in lockstep with the contract; an extra explicit
+                # _l2_normalize call below is then a defensive no-op for
+                # this backend but guards future backend additions.
                 arr = self._backend.encode(
                     texts,
                     batch_size=batch_size,
                     show_progress_bar=False,
                     convert_to_numpy=True,
+                    normalize_embeddings=True,
                 )
                 arr = np.asarray(arr, dtype=np.float32)
             else:
@@ -271,7 +279,71 @@ class EmbeddingModel:
             )
             raise EmbeddingError(msg)
 
-        return arr
+        # Audit-02 KNT-101: enforce L2 normalization centrally regardless of
+        # backend so the documented contract holds for every entry in REGISTRY,
+        # not just the BGE-family fastembed default. fastembed+BGE already
+        # returns unit-norm vectors so this is ~no-op there; sentence-transformers
+        # was passed normalize_embeddings=True above so this is also a no-op
+        # there. The cost is one np.linalg.norm + division per call (≈1µs per
+        # row at 384-dim), which is far below inference cost (~1ms/row CPU).
+        return _l2_normalize(arr)
+
+
+# ---------------------------------------------------------------------------
+# Offline mode env-var scope (KNT-103)
+# ---------------------------------------------------------------------------
+
+
+_OFFLINE_ENV_VARS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
+
+
+@contextmanager
+def _offline_env_scope(offline: bool) -> Iterator[None]:
+    """Snapshot/restore ``HF_HUB_OFFLINE`` and ``TRANSFORMERS_OFFLINE`` around
+    a backend-construction block.
+
+    When ``offline`` is True, both vars are set to ``"1"``; on exit the
+    pre-call values (or absence) are restored even if the body raises.
+    When ``offline`` is False, the function is a no-op — we deliberately do
+    NOT force the vars to ``"0"`` because callers may have other reasons
+    to keep huggingface_hub offline (firewall policy, etc.); we only
+    promise that *our* offline mode does not leak across calls.
+    """
+    if not offline:
+        yield
+        return
+
+    snapshot = {var: os.environ.get(var) for var in _OFFLINE_ENV_VARS}
+    try:
+        for var in _OFFLINE_ENV_VARS:
+            os.environ[var] = "1"
+        yield
+    finally:
+        for var, prior in snapshot.items():
+            if prior is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prior
+
+
+# ---------------------------------------------------------------------------
+# L2 normalization (KNT-101)
+# ---------------------------------------------------------------------------
+
+
+def _l2_normalize(arr: np.ndarray) -> np.ndarray:
+    """Return ``arr`` with each row L2-normalized to unit length.
+
+    All-zero rows are returned as zeros (no division by zero). Inputs that
+    are already unit-norm are unchanged to within float32 epsilon — the
+    division-by-norm round-trip introduces at most ~1e-7 of drift, which is
+    irrelevant for cosine similarity and matches what the retriever's own
+    re-normalization step produces.
+    """
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    # Replace zero norms with 1.0 so the division leaves zero rows as-is.
+    safe = np.where(norms == 0.0, 1.0, norms)
+    return (arr / safe).astype(np.float32, copy=False)
 
 
 # ---------------------------------------------------------------------------
@@ -279,11 +351,29 @@ class EmbeddingModel:
 # ---------------------------------------------------------------------------
 
 
+_VALID_BACKENDS: frozenset[str] = frozenset({"auto", "fastembed", "sentence-transformers"})
+
+
 def _resolve_backend(requested: str, device: DeviceInfo, registry_backend: str) -> str:
     """Determine which backend to use given user preference and device.
 
+    Audit-02 KNT-107: ``requested`` is validated against the closed set
+    ``{"auto", "fastembed", "sentence-transformers"}``. Unknown values
+    (typos like ``"tensorflow"``) used to silently fall through to the
+    auto path and pick a backend that the user did not ask for; now
+    they raise ``ValueError`` with the valid set.
+
     Returns 'fastembed' or 'sentence-transformers'.
     """
+    if requested not in _VALID_BACKENDS:
+        msg = (
+            f"Invalid backend {requested!r}. "
+            f"Fix: use one of {sorted(_VALID_BACKENDS)}. "
+            "Alternative: leave the setting unset to use the auto-detected "
+            "backend (fastembed on CPU, sentence-transformers on GPU)."
+        )
+        raise ValueError(msg)
+
     if requested == "fastembed":
         return "fastembed"
     if requested == "sentence-transformers":

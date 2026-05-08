@@ -139,11 +139,14 @@ def test_semantic_dedup_accepts_settings():
 
 
 def test_offline_setting_sets_hf_env_vars(monkeypatch):
-    """When ``KaosNLPTransformersSettings(offline=True)`` is passed to
-    ``EmbeddingModel.load``, the load path must set ``HF_HUB_OFFLINE`` and
-    ``TRANSFORMERS_OFFLINE`` so the underlying huggingface_hub clients
-    refuse network access. We can verify this without a real download by
-    poisoning the backend loaders to raise immediately.
+    """``KaosNLPTransformersSettings(offline=True)`` makes ``EmbeddingModel.load``
+    set ``HF_HUB_OFFLINE`` and ``TRANSFORMERS_OFFLINE`` to ``"1"`` while the
+    backend is being constructed.
+
+    Audit-02 KNT-103 changed the original setdefault-and-leak behavior into a
+    scoped context manager. We capture the env-var state by intercepting the
+    backend loader (which sees the env mid-scope), then assert restoration
+    behavior in the audit-02 regression suite.
     """
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
     monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
@@ -151,19 +154,24 @@ def test_offline_setting_sets_hf_env_vars(monkeypatch):
     from kaos_nlp_transformers import embedding as embedding_mod
     from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 
-    def _explode(*args, **kwargs):
+    captured: dict[str, str | None] = {}
+
+    def _capture_then_explode(*args, **kwargs):
+        captured["HF_HUB_OFFLINE"] = os.environ.get("HF_HUB_OFFLINE")
+        captured["TRANSFORMERS_OFFLINE"] = os.environ.get("TRANSFORMERS_OFFLINE")
         msg = "stub backend (env-var capture only)"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(embedding_mod, "_load_fastembed_cached", _explode)
-    monkeypatch.setattr(embedding_mod, "_load_sentence_transformers_cached", _explode)
+    monkeypatch.setattr(embedding_mod, "_load_fastembed_cached", _capture_then_explode)
+    monkeypatch.setattr(embedding_mod, "_load_sentence_transformers_cached", _capture_then_explode)
 
     s = KaosNLPTransformersSettings(offline=True)
     with pytest.raises(RuntimeError, match="stub backend"):
         embedding_mod.EmbeddingModel.load(settings=s)
 
-    assert os.environ.get("HF_HUB_OFFLINE") == "1"
-    assert os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+    # Mid-scope (when the backend loader ran), both vars were "1".
+    assert captured["HF_HUB_OFFLINE"] == "1"
+    assert captured["TRANSFORMERS_OFFLINE"] == "1"
 
 
 # -----------------------------------------------------------------------------
@@ -184,8 +192,9 @@ def test_top_level_all_passes_isort_check():
     actual = list(kaos_nlp_transformers.__all__)
     # Constants first (uppercase-only), then mixed-case, then dunder, then
     # lowercase callables — matches ruff RUF022 when ruff check is green.
+    # Audit-02 KNT-104 added RERANKER_EXCLUDED + RERANKER_REGISTRY constants.
     expected_groups = {
-        "constants": ["EXCLUDED", "REGISTRY"],
+        "constants": ["EXCLUDED", "REGISTRY", "RERANKER_EXCLUDED", "RERANKER_REGISTRY"],
         "classes": [
             "BackendNotInstalledError",
             "CrossEncoderReranker",

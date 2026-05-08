@@ -23,6 +23,40 @@ from kaos_nlp_transformers.embedding import EmbeddingModel
 from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 
 
+def _validate_parallel_lengths(
+    *,
+    n: int,
+    doc_ids: list[int],
+    texts: list[str],
+    external_ids: tuple[str | None, ...] | list[str | None] | list[str] | None,
+    metadata_list: list[dict[str, Any]] | None,
+) -> None:
+    """Audit-02 KNT-102: validate every parallel list against ``n`` before any
+    state mutation. Raises ``ValueError`` with a specific message naming the
+    offending field — never returns False. Empty list (``[]``) is treated as
+    "explicitly empty, must equal n=0", distinct from ``None`` (omitted →
+    auto-fill defaults).
+    """
+    if len(doc_ids) != n:
+        msg = f"doc_ids length ({len(doc_ids)}) must match embeddings rows ({n})"
+        raise ValueError(msg)
+    if len(texts) != n:
+        msg = f"texts length ({len(texts)}) must match embeddings rows ({n})"
+        raise ValueError(msg)
+    if external_ids is not None and len(external_ids) != n:
+        msg = (
+            f"external_ids length ({len(external_ids)}) must match embeddings "
+            f"rows ({n}); pass None to auto-fill defaults"
+        )
+        raise ValueError(msg)
+    if metadata_list is not None and len(metadata_list) != n:
+        msg = (
+            f"metadata_list length ({len(metadata_list)}) must match embeddings "
+            f"rows ({n}); pass None to auto-fill defaults"
+        )
+        raise ValueError(msg)
+
+
 def _group_corpus_units_for_embedding(
     corpus: Any, group_by: str
 ) -> tuple[list[int], list[str], list[str | None], list[dict[str, Any]]]:
@@ -106,17 +140,23 @@ class EmbeddingRetriever:
         if embeddings.ndim != 2:
             msg = f"embeddings must be 2-D, got shape {embeddings.shape}"
             raise ValueError(msg)
-        if embeddings.shape[0] != len(doc_ids):
-            msg = (
-                f"embeddings rows ({embeddings.shape[0]}) must match "
-                f"doc_ids length ({len(doc_ids)})"
-            )
-            raise ValueError(msg)
-        if embeddings.shape[0] != len(texts):
-            msg = f"embeddings rows ({embeddings.shape[0]}) must match texts length ({len(texts)})"
-            raise ValueError(msg)
 
-        # L2-normalize for cosine similarity via dot product
+        # Audit-02 KNT-102: validate ALL parallel-list lengths before any
+        # internal-state mutation, including external_ids and metadata_list
+        # (previously unchecked → silent corruption on mismatch). Empty-list
+        # is treated as "explicitly empty, must equal N=0" rather than the
+        # pre-fix falsy-equals-omitted default.
+        _validate_parallel_lengths(
+            n=embeddings.shape[0],
+            doc_ids=doc_ids,
+            texts=texts,
+            external_ids=external_ids,
+            metadata_list=metadata_list,
+        )
+
+        # L2-normalize for cosine similarity via dot product. Inputs that are
+        # already unit-norm (the EmbeddingModel.embed contract since 0.1.0a2)
+        # round-trip through this with at most ~1e-7 of float drift.
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
         # Avoid division by zero for all-zero vectors
         norms = np.where(norms == 0, 1.0, norms)
@@ -124,8 +164,14 @@ class EmbeddingRetriever:
 
         self._doc_ids = list(doc_ids)
         self._texts = list(texts)
-        self._external_ids = list(external_ids) if external_ids else [None] * len(doc_ids)
-        self._metadata_list = list(metadata_list) if metadata_list else [{} for _ in doc_ids]
+        # Distinguish "omitted" (None → fill defaults) from "explicit []"
+        # which is now caught by _validate_parallel_lengths above.
+        self._external_ids = (
+            list(external_ids) if external_ids is not None else [None] * len(doc_ids)
+        )
+        self._metadata_list = (
+            list(metadata_list) if metadata_list is not None else [{} for _ in doc_ids]
+        )
         self._model = model
 
     @property
@@ -197,24 +243,43 @@ class EmbeddingRetriever:
         if not texts:
             return
 
+        # Audit-02 KNT-102: validate ALL parallel-list lengths before
+        # mutating any internal state. The previous version embedded first
+        # then extended lists without checking external_ids / metadata_list
+        # length — a length mismatch would silently corrupt indices.
+        _validate_parallel_lengths(
+            n=len(texts),
+            doc_ids=doc_ids,
+            texts=texts,
+            external_ids=external_ids,
+            metadata_list=metadata_list,
+        )
+
+        # Embed first (network/disk-bound). EmbeddingModel.embed enforces
+        # L2 normalization (KNT-101) so the local re-normalize is now
+        # defensive — keeps the retriever robust if a future code path
+        # bypasses the model layer.
         new_vecs = self._model.embed(texts, batch_size=batch_size)
         norms = np.linalg.norm(new_vecs, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1.0, norms)
         new_vecs = (new_vecs / norms).astype(np.float32)
 
+        # Build the list-extensions BEFORE mutating any field, so an
+        # exception during numpy stacking doesn't leave a partially-updated
+        # retriever.
+        new_external_ids: list[str | None] = (
+            list(external_ids) if external_ids is not None else [None] * len(texts)
+        )
+        new_metadata: list[dict[str, Any]] = (
+            list(metadata_list) if metadata_list is not None else [{} for _ in texts]
+        )
+
+        # All-or-nothing commit.
         self._embeddings = np.vstack([self._embeddings, new_vecs])
         self._doc_ids.extend(doc_ids)
         self._texts.extend(texts)
-
-        if external_ids:
-            self._external_ids.extend(external_ids)
-        else:
-            self._external_ids.extend([None] * len(texts))
-
-        if metadata_list:
-            self._metadata_list.extend(metadata_list)
-        else:
-            self._metadata_list.extend([{} for _ in texts])
+        self._external_ids.extend(new_external_ids)
+        self._metadata_list.extend(new_metadata)
 
     @classmethod
     def from_texts(
@@ -308,18 +373,22 @@ class EmbeddingRetriever:
     ) -> EmbeddingRetriever:
         """Build an embedding retriever from any structurally-compatible corpus.
 
-        Audit-01 KNT-001: this method accepts any corpus object that satisfies
-        the structural protocol below; it does NOT import ``kaos-ml-core``
-        (the documented consumer). The DAG flows downward only.
+        Audit-01 KNT-001: this method does NOT import ``kaos-ml-core`` (the
+        documented consumer). The DAG flows downward only.
+
+        Audit-02 KNT-106: simplified to a single embedding code path. The
+        prior implementation tried two paths (``corpus.embed()`` if present,
+        else inline embedding) and lost device/backend/settings policy on the
+        first one. Now everything goes through ``EmbeddingModel.embed`` so
+        the loaded policy reaches every row.
 
         Required of ``corpus``:
 
-        - Iterable yielding "unit" objects with attributes ``row`` (int),
-          ``text`` (str), ``doc_uri`` (str), ``page`` (int | None),
-          ``section_ref`` (str | None), and ``section_title`` (str | None).
-        - Either an ``embed(model=..., batch_size=...) -> np.ndarray`` method
-          (preferred — typically with caching), or no method at all, in which
-          case the texts are embedded here directly.
+        - **Sequence-or-iterable** of "unit" objects with attributes ``row``
+          (int), ``text`` (str), ``doc_uri`` (str), ``page`` (int | None),
+          ``section_ref`` (str | None), ``section_title`` (str | None).
+          Iterators are accepted but materialized once internally — caller
+          should not assume the corpus can be iterated again after this call.
 
         Args:
             corpus: A corpus object satisfying the protocol above.
@@ -338,51 +407,33 @@ class EmbeddingRetriever:
             settings: Module settings override forwarded to
                 ``EmbeddingModel.load`` (audit-01 KNT-004).
         """
+        # Materialize once so iterator-style corpora aren't consumed twice
+        # (KNT-106). The model load is also done once for both grouped and
+        # ungrouped paths — it's needed either way for query embedding at
+        # retrieve time.
+        units = list(corpus)
         em = EmbeddingModel.load(model_id, device=device, backend=backend, settings=settings)
 
         if group_by is not None:
             doc_ids, texts, external_ids, metadata_list = _group_corpus_units_for_embedding(
-                corpus, group_by
+                units, group_by
             )
         else:
-            # Prefer corpus.embed() when available (typically caches by
-            # model+batch_size). Otherwise embed the unit texts directly —
-            # this avoids the historical upward import of kaos_ml_core.features.
-            if hasattr(corpus, "embed"):
-                vecs = corpus.embed(model=model_id, batch_size=batch_size)
-            else:
-                vecs = em.embed([u.text for u in corpus], batch_size=batch_size)
+            doc_ids = [unit.row for unit in units]
+            texts = [unit.text for unit in units]
+            external_ids = [corpus_unit_passage_uri(unit) for unit in units]
+            metadata_list = [
+                {
+                    "doc_id": corpus_unit_passage_uri(unit),
+                    "doc_uri": unit.doc_uri,
+                    "page": unit.page,
+                    "section_ref": unit.section_ref,
+                    "section_title": unit.section_title,
+                }
+                for unit in units
+            ]
 
-            doc_ids: list[int] = []
-            texts: list[str] = []
-            external_ids: list[str | None] = []
-            metadata_list: list[dict[str, Any]] = []
-
-            for unit in corpus:
-                doc_ids.append(unit.row)
-                texts.append(unit.text)
-                passage_uri = corpus_unit_passage_uri(unit)
-                external_ids.append(passage_uri)
-                metadata_list.append(
-                    {
-                        "doc_id": passage_uri,
-                        "doc_uri": unit.doc_uri,
-                        "page": unit.page,
-                        "section_ref": unit.section_ref,
-                        "section_title": unit.section_title,
-                    }
-                )
-
-            return cls(
-                embeddings=vecs,
-                doc_ids=doc_ids,
-                texts=texts,
-                external_ids=external_ids,
-                metadata_list=metadata_list,
-                model=em,
-            )
-
-        # Embed grouped texts
+        # Single embedding code path — the loaded model honors all policy.
         vecs = em.embed(texts, batch_size=batch_size)
         return cls(
             embeddings=vecs,

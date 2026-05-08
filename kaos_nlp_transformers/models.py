@@ -77,4 +77,44 @@ EXCLUDED: dict[str, str] = {
 }
 
 
-__all__ = ["EXCLUDED", "REGISTRY", "RegisteredModel"]
+# ---------------------------------------------------------------------------
+# Reranker registry (audit-02 KNT-104)
+# ---------------------------------------------------------------------------
+
+# Audit-02 KNT-104: rerankers go through the same license / revision /
+# offline policy as embeddings. The reranker shape mirrors RegisteredModel
+# but lives in its own dict so task-specific defaults stay clear and the
+# embedding registry can never accidentally be used to load a reranker
+# (or vice versa).
+#
+# Revision SHAs verified against huggingface.co/api/models/<id> on
+# 2026-05-08; confirmation procedure documented in the model expansion
+# checklist.
+RERANKER_REGISTRY: dict[str, RegisteredModel] = {
+    "BAAI/bge-reranker-base": RegisteredModel(
+        model_id="BAAI/bge-reranker-base",
+        revision="2cfc18c9415c912f9d8155881c133215df768a70",
+        license="MIT",
+        params_m=278,
+        # Cross-encoders return a single relevance score per (query, passage)
+        # pair, not a vector — dim is recorded as 1 for shape symmetry with
+        # RegisteredModel rather than as an embedding dimension.
+        dim=1,
+        backend="sentence-transformers",
+        notes="Default v0 reranker. CPU-friendly cross-encoder. Verified 2026-05-08.",
+    ),
+}
+
+
+# Same shape as EXCLUDED but for rerankers. Currently empty — re-add
+# entries here as license / data-licensing concerns surface.
+RERANKER_EXCLUDED: dict[str, str] = {}
+
+
+__all__ = [
+    "EXCLUDED",
+    "REGISTRY",
+    "RERANKER_EXCLUDED",
+    "RERANKER_REGISTRY",
+    "RegisteredModel",
+]

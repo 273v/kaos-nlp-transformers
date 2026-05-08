@@ -129,7 +129,7 @@ kaos-nlp-transformers-serve          # placeholder; MCP wiring in 0.1.0a2+
 | **OS** | Any platform with a CPython 3.13+ wheel and ONNX Runtime support — Linux x86_64 + aarch64 (manylinux), macOS x86_64 + arm64, Windows x86_64. |
 | **Maturity** | Alpha. The public API is documented in `kaos_nlp_transformers.__all__`. |
 | **Stability policy** | Pre-1.0: minor bumps may change behaviour. Every change is documented in [`CHANGELOG.md`](CHANGELOG.md). |
-| **Test coverage** | 56 Python unit tests + 7 audit-01 regression tests (63 total). Live integration tests exercise real fastembed model downloads and a sentence-transformers GPU path; gated on the `live` and `gpu` markers respectively. |
+| **Test coverage** | 56 Python unit tests + 7 audit-01 + 24 audit-02 regression tests (87 total). Live integration tests exercise real fastembed model downloads and the sentence-transformers GPU path; gated on the `live` and `gpu` markers respectively. |
 | **Type checker** | Validated with [`ty`](https://docs.astral.sh/ty/), Astral's Python type checker. |
 
 ## Companion packages

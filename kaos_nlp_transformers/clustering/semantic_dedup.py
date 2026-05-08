@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import ClassVar
 
+import numpy as np
 from kaos_content.dedup.types import DedupCluster, DedupDocument, DedupLevel
 from kaos_core.logging import get_logger
 
@@ -43,6 +44,20 @@ class SemanticDedupLevel(DedupLevel):
         backend: str | None = None,
         settings: KaosNLPTransformersSettings | None = None,
     ) -> None:
+        # Audit-02 KNT-105: validate distance_threshold against the cosine-
+        # distance domain [0, 2]. fcluster will accept any positive float, but
+        # values >2 silently flatten everything into one cluster (every
+        # cosine distance fits) and values <0 raise inside scipy with a
+        # confusing message. Catch it at construction.
+        if not 0.0 <= distance_threshold <= 2.0:
+            msg = (
+                f"distance_threshold={distance_threshold!r} is outside the "
+                "cosine distance domain [0.0, 2.0]. "
+                "Fix: pick a value in (0.0, 1.0] for typical near-duplicate / "
+                "topic clustering. 0.10 is the default for same-template "
+                "matches; 0.20 for same-topic clusters."
+            )
+            raise ValueError(msg)
         """
         Args:
             model_id: Embedding model identifier. Must be registered
@@ -121,17 +136,42 @@ class SemanticDedupLevel(DedupLevel):
         for idx, label in enumerate(labels):
             groups[int(label)].append(idx)
 
+        # EmbeddingModel.embed enforces L2 normalization (audit-02 KNT-101),
+        # so dot products on these rows already give cosine similarity.
+        # The defensive normalize-here-too step is cheap and keeps this
+        # block correct even if a future code path skips the model layer.
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        safe = np.where(norms == 0.0, 1.0, norms)
+        unit = embeddings / safe
+
         clusters: list[DedupCluster] = []
         for label, members in groups.items():
             if len(members) < 2:
                 continue
             member_docs = [valid[m][1] for m in members]
+
+            # Audit-02 KNT-105: compute mean intra-cluster cosine similarity.
+            # The DedupCluster default (similarity=1.0) was inherited unset
+            # before this change, so every semantic cluster reported 1.0
+            # regardless of cluster tightness. With unit-norm rows, sim is
+            # the upper-triangular mean of unit @ unit.T over `members`.
+            block = unit[members]
+            sim_matrix = block @ block.T
+            n_members = len(members)
+            # Sum the strict upper triangle, count = n*(n-1)/2.
+            triu_sum = float(np.triu(sim_matrix, k=1).sum())
+            n_pairs = n_members * (n_members - 1) // 2
+            mean_sim = triu_sum / n_pairs if n_pairs else 1.0
+            # Clamp into [0.0, 1.0] for numeric jitter on near-1.0 values.
+            mean_sim = float(min(max(mean_sim, 0.0), 1.0))
+
             clusters.append(
                 DedupCluster(
                     cluster_id=f"semantic_{label}_{member_docs[0].doc_id}",
                     canonical_doc_id=member_docs[0].doc_id,
                     member_doc_ids=tuple(d.doc_id for d in member_docs),
                     level=self.name,
+                    similarity=mean_sim,
                 )
             )
         return clusters

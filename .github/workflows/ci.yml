@@ -1,0 +1,310 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ────────────── lint ──────────────
+  # Separate from tests so format / lint / type failures fail-fast and
+  # are easy to spot without combing through test output.
+  lint:
+    name: Lint
+    runs-on: kaos-x64-16core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: lint-py3.13
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group dev --python 3.13
+
+      - name: Ruff format check
+        run: uv run ruff format --check kaos_nlp_transformers/ tests/
+
+      - name: Ruff lint
+        run: uv run ruff check kaos_nlp_transformers/ tests/
+
+      - name: Type check (ty)
+        run: uv run ty check kaos_nlp_transformers/ tests/
+
+  # ────────────── pre-commit ──────────────
+  # Catches any drift between the local pre-commit config and the
+  # checks above. If a contributor disabled their local hooks, this
+  # job still enforces the contract on the PR.
+  pre-commit:
+    name: Pre-commit hooks
+    runs-on: kaos-x64-16core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: pre-commit-py3.13
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies (needed by the local ty hook)
+        run: uv sync --group dev --python 3.13
+
+      - name: Run pre-commit
+        run: uvx pre-commit run --all-files --show-diff-on-failure
+
+  # ────────────── test ──────────────
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: kaos-x64-16core
+    # Stable matrix entries gate PRs; experimental entries
+    # (3.14t free-threaded, 3.15-dev pre-release) are informational
+    # only — the matrix `experimental: true` flag flips
+    # `continue-on-error` so CI is not blocked by upstream churn we
+    # cannot fix.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.13"
+            experimental: false
+          - python-version: "3.14"
+            experimental: false
+          # Free-threaded build (PEP 703). Available since 3.14 GA.
+          # We don't yet ship `Py_GIL_DISABLED` extensions, but we want
+          # early signal that pure-Python imports + tests still work
+          # without the GIL.
+          - python-version: "3.14t"
+            experimental: true
+          # Pre-release of 3.15 (expected GA October 2026). Catches
+          # ecosystem incompatibilities (deferred annotations, removed
+          # APIs) before consumers hit them.
+          - python-version: "3.15"
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          # One cache per matrix leg. Without this, all 5 jobs race
+          # on the same cache key and only the first to finish wins —
+          # the others throw away their compiled wheels (Pillow,
+          # pydantic-core, numpy on 3.14t / 3.15) and recompile from
+          # source on every run. The annotation
+          # "Failed to save: Unable to reserve cache with key …"
+          # in the prior CI logs is exactly this race.
+          cache-suffix: test-py${{ matrix.python-version }}
+
+      - name: Install Python ${{ matrix.python-version }}
+        # `--preview` lets `uv python install` resolve in-development
+        # interpreters (3.15) and the free-threaded variant (3.14t).
+        # No-op for stable versions.
+        run: uv python install --preview ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --group dev --python ${{ matrix.python-version }}
+
+      - name: Run unit tests with coverage
+        # Only `tests/unit/` runs in regular CI. `tests/integration/`
+        # is the live-tier (real provider APIs) and runs separately
+        # with credentials gated behind a manual workflow.
+        run: |
+          uv run pytest tests/unit/ \
+            --cov=kaos_nlp_transformers \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        if: always() && !matrix.experimental
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
+          retention-days: 14
+
+  # ────────────── min-deps ──────────────
+  # Resolve and test against the minimum declared versions of every
+  # dependency so we catch "we said >=X but actually need X+1" drift.
+  # Runs on 3.13 only; 3.14 is the cutting edge and may not have wheels
+  # for very old dep versions.
+  min-deps:
+    name: Test against minimum dependencies
+    runs-on: kaos-x64-16core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          # min-deps resolves with --resolution=lowest-direct, which
+          # downloads materially different wheel versions than the
+          # other 3.13 jobs. Separate cache so the two don't fight
+          # over the same key.
+          cache-suffix: min-deps-py3.13
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install with lowest-direct resolution
+        run: uv sync --group dev --resolution=lowest-direct --python 3.13
+
+      - name: Run unit tests
+        run: |
+          uv run pytest tests/unit/ \
+            --no-cov \
+            -q
+
+  # ────────────── build + wheel smoke test ──────────────
+  build:
+    name: Build distribution + smoke test
+    runs-on: kaos-x64-16core
+    # Build only depends on the fast quality gates (lint + pre-commit
+    # + min-deps), NOT the matrix. ``kaos-nlp-transformers`` is pure Python — we
+    # ship one universal ``py3-none-any.whl`` regardless of interpreter
+    # version. The matrix legs verify our pure-Python code runs under
+    # different interpreters; their wall-clock time is dominated by
+    # transitive native deps (duckdb, pydantic-core, rpds-py) being
+    # source-built when upstream wheels don't exist for that
+    # interpreter (notably 3.15 alpha, 3.14t free-threaded). Gating
+    # build on the slowest experimental compile would chain a 30-sec
+    # wheel build behind 25+ minutes of upstream Rust/C++ source
+    # builds — pure friction. The matrix legs continue running
+    # informationally; the experimental ones stay ``continue-on-error``.
+    needs: [lint, pre-commit, min-deps]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: build-py3.13
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Verify metadata (twine check)
+        run: uvx --from twine twine check --strict dist/*
+
+      - name: Smoke-test the built wheel in a clean venv
+        # Install the actually-built wheel (not the source tree) into a
+        # clean Python environment and exercise the public API. This
+        # catches packaging bugs that source-tree tests miss: missing
+        # data files, broken `__init__.py` exports, sdist-only files
+        # that reference dist-only paths, etc.
+        #
+        # We DO download a real model in CI here — the package is an
+        # ML library; a smoke test that doesn't load and run a model is
+        # documentation, not verification. fastembed's BAAI/bge-small-en
+        # ONNX is ~30MiB, downloads in seconds, runs on CPU.
+        run: |
+          uv venv --python 3.13 /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/kaos_nlp_transformers-*-py3-none-any.whl
+          /tmp/smoke/bin/python -c "
+          import numpy as np
+
+          import kaos_nlp_transformers
+          from kaos_nlp_transformers import (
+              EmbeddingModel,
+              EmbeddingRetriever,
+              EXCLUDED,
+              KaosNLPTransformersSettings,
+              REGISTRY,
+              detect_devices,
+          )
+
+          # Version reachable.
+          assert kaos_nlp_transformers.__version__, 'version missing from wheel'
+
+          # Public surface imports without error and is non-trivial.
+          assert len(kaos_nlp_transformers.__all__) >= 14, kaos_nlp_transformers.__all__
+
+          # py.typed marker shipped.
+          import importlib.resources as ir
+          assert ir.files('kaos_nlp_transformers').joinpath('py.typed').is_file(), 'py.typed missing'
+
+          # Registry has at least one license-vetted model and the EXCLUDED
+          # list still names the known non-permissive ones.
+          assert 'BAAI/bge-small-en-v1.5' in REGISTRY
+          assert any(m.startswith('jinaai/') or 'NV-Embed' in m for m in EXCLUDED), EXCLUDED
+
+          # Settings construct cleanly from an empty environment.
+          s = KaosNLPTransformersSettings()
+          assert s.default_model == 'BAAI/bge-small-en-v1.5'
+
+          # Device detection runs and returns the expected dataclass.
+          devs = detect_devices()
+          assert hasattr(devs, 'cuda_visible') and hasattr(devs, 'platform_name')
+
+          # Real ML: load + embed + cosine similarity.
+          model = EmbeddingModel.load('BAAI/bge-small-en-v1.5')
+          vecs = model.embed([
+              'Force majeure clauses excuse performance.',
+              'Indemnity caps the liability of the seller.',
+          ])
+          assert vecs.shape == (2, 384) and vecs.dtype == np.float32, vecs.shape
+
+          n0 = vecs[0] / np.linalg.norm(vecs[0])
+          n1 = vecs[1] / np.linalg.norm(vecs[1])
+          sim = float(np.dot(n0, n1))
+          assert 0.5 < sim < 0.8, f'unexpected sim for legal-pair: {sim}'
+
+          # Retrieval round-trip.
+          import asyncio
+          retriever = EmbeddingRetriever.from_texts(
+              texts=[
+                  'The buyer agrees to mediation in Delaware.',
+                  'All disputes shall be resolved by arbitration in New York.',
+                  'Force majeure clauses excuse performance.',
+              ],
+              doc_ids=[0, 1, 2],
+          )
+          hits = asyncio.run(retriever.retrieve('where do contract disputes go?', top_k=2))
+          assert len(hits) == 2 and hits[0].doc_id in (0, 1), [(h.doc_id, h.score) for h in hits]
+
+          print(f'kaos-nlp-transformers {kaos_nlp_transformers.__version__}: smoke OK (sim={sim:.3f})')
+          "
+          # Exercise both CLI entrypoints.
+          /tmp/smoke/bin/kaos-nlp-transformers info --json
+          /tmp/smoke/bin/kaos-nlp-transformers-serve --help || true
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7

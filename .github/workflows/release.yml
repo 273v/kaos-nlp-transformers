@@ -1,0 +1,173 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Manual fallback so a failed publish (e.g. a transient PyPI 5xx) can
+  # be retried without re-tagging.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: kaos-x64-16core
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: release-py3.13
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group dev --python 3.13
+
+      - name: Verify version matches tag
+        id: version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=$(uv run python -c "from kaos_nlp_transformers._version import __version__; print(__version__)")
+          TAG=${GITHUB_REF_NAME#v}
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "::error::Tag '$TAG' does not match _version.py value '$VERSION'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Pre-publish QA
+        run: |
+          uv run ruff format --check kaos_nlp_transformers/ tests/
+          uv run ruff check kaos_nlp_transformers/ tests/
+          uv run ty check kaos_nlp_transformers/ tests/
+          uv run pytest tests/unit/ --no-cov
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Verify metadata
+        run: uvx --from twine twine check --strict dist/*
+
+      - name: Smoke-test the built wheel in a clean venv
+        run: |
+          uv venv --python 3.13 /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/kaos_nlp_transformers-*-py3-none-any.whl
+          /tmp/smoke/bin/python -c "
+          import asyncio
+          import numpy as np
+
+          import kaos_nlp_transformers
+          from kaos_nlp_transformers import (
+              EmbeddingModel,
+              EmbeddingRetriever,
+              KaosNLPTransformersSettings,
+              REGISTRY,
+          )
+
+          assert kaos_nlp_transformers.__version__, 'version missing from wheel'
+          assert len(kaos_nlp_transformers.__all__) >= 14
+          assert 'BAAI/bge-small-en-v1.5' in REGISTRY
+          assert KaosNLPTransformersSettings().default_model == 'BAAI/bge-small-en-v1.5'
+
+          # Real ML round-trip: load + embed + retrieve. The wheel is what
+          # PyPI users will install; if the model can't load and run from a
+          # clean install, the package is broken regardless of unit-test
+          # passes.
+          model = EmbeddingModel.load('BAAI/bge-small-en-v1.5')
+          vecs = model.embed([
+              'Force majeure clauses excuse performance.',
+              'Indemnity caps the liability of the seller.',
+          ])
+          assert vecs.shape == (2, 384) and vecs.dtype == np.float32
+
+          retriever = EmbeddingRetriever.from_texts(
+              texts=[
+                  'The buyer agrees to mediation in Delaware.',
+                  'All disputes shall be resolved by arbitration in New York.',
+                  'Force majeure clauses excuse performance.',
+              ],
+              doc_ids=[0, 1, 2],
+          )
+          hits = asyncio.run(retriever.retrieve('contract dispute resolution', top_k=2))
+          assert len(hits) == 2
+          print(f'kaos-nlp-transformers {kaos_nlp_transformers.__version__}: smoke OK')
+          "
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 30
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: kaos-x64-16core
+    environment:
+      name: pypi
+      url: https://pypi.org/p/kaos-nlp-transformers
+    permissions:
+      id-token: write  # OIDC for Trusted Publishing
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+          skip-existing: false
+
+  github-release:
+    name: Create GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: kaos-x64-16core
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          PRERELEASE_FLAG=""
+          if [[ "$VERSION" == *a* || "$VERSION" == *b* || "$VERSION" == *rc* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "kaos-nlp-transformers $VERSION" \
+            --notes-from-tag \
+            $PRERELEASE_FLAG \
+            dist/*

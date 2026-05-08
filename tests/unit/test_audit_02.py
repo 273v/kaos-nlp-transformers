@@ -263,6 +263,13 @@ def test_consecutive_offline_loads_dont_leak(monkeypatch):
     the second one must NOT see the first one's env-var leftovers."""
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
 
+    # Audit-03 KNT-201: the free-threaded guard short-circuits load
+    # BEFORE the backend loader runs. Force the GIL-enabled path so
+    # this test exercises only the consecutive-load offline contract.
+    import sys
+
+    monkeypatch.setattr(sys, "_is_gil_enabled", lambda: True, raising=False)
+
     from kaos_nlp_transformers import embedding as embedding_mod
     from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 

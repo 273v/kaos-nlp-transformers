@@ -151,6 +151,15 @@ def test_offline_setting_sets_hf_env_vars(monkeypatch):
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
     monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
 
+    # Audit-03 KNT-201 added a free-threaded Python guard at the top of
+    # EmbeddingModel.load. On a Py_GIL_DISABLED interpreter (3.14t etc.)
+    # the guard fires BEFORE the backend loader, so the offline env-var
+    # capture below never runs. Force the GIL-enabled path here so this
+    # audit-01 test exercises only the offline-scope contract.
+    import sys
+
+    monkeypatch.setattr(sys, "_is_gil_enabled", lambda: True, raising=False)
+
     from kaos_nlp_transformers import embedding as embedding_mod
     from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 

@@ -50,7 +50,9 @@ def test_every_registered_model_declares_a_dim():
 def test_every_registered_model_has_a_supported_backend():
     from kaos_nlp_transformers.models import REGISTRY
 
-    valid = {"fastembed", "sentence-transformers"}
+    # audit-04 KNT-302: "model2vec" is the third valid backend, alongside
+    # fastembed (ONNX) and sentence-transformers (torch).
+    valid = {"fastembed", "sentence-transformers", "model2vec"}
     for model_id, entry in REGISTRY.items():
         assert entry.backend in valid, (
             f"{model_id} has backend={entry.backend!r}; must be one of {sorted(valid)}"
@@ -73,3 +75,41 @@ def test_excluded_models_are_not_in_registry():
 
     for model_id in EXCLUDED:
         assert model_id not in REGISTRY, f"{model_id} is in BOTH EXCLUDED and REGISTRY — pick one"
+
+
+# audit-04 KNT-301: model2vec entries with full 40-char SHA pins ----
+
+
+def test_revisions_are_full_40char_shas():
+    """Pinned revisions must be the full 40-char SHA from huggingface.co.
+
+    The 7-char minimum in ``test_every_registered_model_pins_a_real_revision``
+    catches obviously-broken pins; this stricter check catches sloppy ones
+    (truncated SHAs, branch names disguised as SHAs) before they make it
+    into a registry that downstream caches key against. The audit-04 entries
+    were sourced via huggingface_hub.HfApi().model_info(...).sha so we hold
+    every entry to that bar going forward.
+    """
+    import re
+
+    from kaos_nlp_transformers.models import REGISTRY
+
+    sha_re = re.compile(r"^[0-9a-f]{40}$")
+    for model_id, entry in REGISTRY.items():
+        assert sha_re.match(entry.revision), (
+            f"{model_id} revision {entry.revision!r} is not a 40-char hex SHA "
+            "(check huggingface.co/api/models/<id>.sha and re-pin)"
+        )
+
+
+def test_model2vec_entries_present():
+    """The audit-04 sweep added the two pinned potion models."""
+    from kaos_nlp_transformers.models import REGISTRY
+
+    for model_id in ("minishlab/potion-retrieval-32M", "minishlab/potion-base-32M"):
+        assert model_id in REGISTRY, f"{model_id} missing from REGISTRY"
+        entry = REGISTRY[model_id]
+        assert entry.backend == "model2vec"
+        assert entry.license == "MIT"
+        assert entry.dim == 512
+        assert entry.params_m == 32

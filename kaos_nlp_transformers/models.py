@@ -41,13 +41,26 @@ class RegisteredModel:
     """Free-form notes (default model? legal-doc default? etc.)."""
 
 
-# v0 registry: ONE supported model. v1+ phases broaden it per
-# docs/internal/plans/kaos-nlp-transformers-v0.md.
+# Embedding registry. Three model families covered in alpha:
+#
+# 1. fastembed — ONNX Runtime, CPU-friendly, the default for general retrieval.
+#    Quality bench: BAAI/bge-small-en-v1.5 (33M, 384-dim, MIT).
+#
+# 2. model2vec — static lookup (vocab → vector + average), pure numpy at
+#    inference, no torch. ~500x faster on CPU than the transformer source.
+#    Quality bench (MTEB Retrieval): potion-retrieval-32M = 35.06 (~82% of
+#    all-MiniLM-L6-v2). Use for: first-pass retrieval over 100K+ docs,
+#    high-throughput dedup/clustering. Pair with a cross-encoder reranker
+#    for final-pass quality.
+#
+# 3. sentence-transformers — torch-backed; opt-in via the [torch] extra.
+#    No registry entries here today; reranker registry covers the BGE
+#    cross-encoder via the same backend.
 #
 # Revision SHAs are validated against huggingface.co on every CI run by
 # the optional ``test_registry_shas_exist_on_hub`` test (skipped offline).
-# The bge-small-en-v1.5 SHA below was confirmed against
-# https://huggingface.co/api/models/BAAI/bge-small-en-v1.5 on 2026-04-09.
+# All SHAs were re-verified against huggingface.co/api/models/<id> on
+# 2026-05-08 as part of the audit-04 sweep adding the model2vec entries.
 REGISTRY: dict[str, RegisteredModel] = {
     "BAAI/bge-small-en-v1.5": RegisteredModel(
         model_id="BAAI/bge-small-en-v1.5",
@@ -57,6 +70,42 @@ REGISTRY: dict[str, RegisteredModel] = {
         dim=384,
         backend="fastembed",
         notes="Default v0 embedding model. CPU-friendly, English. Verified 2026-04-09.",
+    ),
+    "minishlab/potion-retrieval-32M": RegisteredModel(
+        model_id="minishlab/potion-retrieval-32M",
+        revision="6fc8051fab2a1e0ee76689cf08c853792ac285e7",
+        license="MIT",
+        params_m=32,
+        # Matryoshka-trained at [32, 64, 128, 256, 512]; the on-disk vectors
+        # are 512-dim and consumers can truncate at retrieval time. We pin
+        # the full dim and document Matryoshka in the README rather than
+        # branching the registry per-cut.
+        dim=512,
+        backend="model2vec",
+        notes=(
+            "Static retrieval-tuned distillation of bge-base-en-v1.5. "
+            "MTEB Retrieval 35.06 (~82% of all-MiniLM-L6-v2) at >500x CPU "
+            "throughput, ~30 MB on disk. Verified 2026-05-08. Requires the "
+            "[model2vec] extra."
+        ),
+    ),
+    "minishlab/potion-base-32M": RegisteredModel(
+        model_id="minishlab/potion-base-32M",
+        revision="1e5a03f8eeb2c98b928fbbd846f22f816360919f",
+        license="MIT",
+        params_m=32,
+        # potion-base is the general-purpose static distillation; same
+        # 512-dim vectors as potion-retrieval but tuned for the average-
+        # over-tasks MTEB score rather than retrieval specifically.
+        dim=512,
+        backend="model2vec",
+        notes=(
+            "Static general-purpose distillation of bge-base-en-v1.5. "
+            "MTEB avg 51.66 (~95% of all-MiniLM-L6-v2). Use for "
+            "classification / dedup / clustering; for retrieval pick "
+            "potion-retrieval-32M instead. Verified 2026-05-08. Requires the "
+            "[model2vec] extra."
+        ),
     ),
 }
 

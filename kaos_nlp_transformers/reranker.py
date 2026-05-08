@@ -40,8 +40,14 @@ from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 logger = get_logger(__name__)
 
 # Default reranker model — MIT license, 0.3B params, CPU-friendly. Pinned
-# revision lives in RERANKER_REGISTRY (audit-02 KNT-104).
-DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-base"
+# revision lives in RERANKER_REGISTRY (audit-02 KNT-104). Derives from the
+# settings field default so a single env-var override
+# (``KAOS_NLP_TRANSFORMERS_DEFAULT_RERANKER_MODEL``) updates every call site
+# that does not pass an explicit ``model_id``. See
+# docs/python/checklists/03-implement.md (settings-driven defaults).
+DEFAULT_RERANKER_MODEL: str = KaosNLPTransformersSettings.model_fields[
+    "default_reranker_model"
+].default
 
 
 class CrossEncoderReranker:

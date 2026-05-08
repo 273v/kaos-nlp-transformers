@@ -202,17 +202,21 @@ def test_top_level_all_passes_isort_check():
     # Constants first (uppercase-only), then mixed-case, then dunder, then
     # lowercase callables — matches ruff RUF022 when ruff check is green.
     # Audit-02 KNT-104 added RERANKER_EXCLUDED + RERANKER_REGISTRY constants.
+    # audit-04 KNT-301..302 added LatentDevice + DeviceNotReachableError
+    # for the OS-level GPU latent surface (see device.py / errors.py).
     expected_groups = {
         "constants": ["EXCLUDED", "REGISTRY", "RERANKER_EXCLUDED", "RERANKER_REGISTRY"],
         "classes": [
             "BackendNotInstalledError",
             "CrossEncoderReranker",
             "DeviceInfo",
+            "DeviceNotReachableError",
             "EmbeddingError",
             "EmbeddingModel",
             "EmbeddingRetriever",
             "KaosNLPTransformersError",
             "KaosNLPTransformersSettings",
+            "LatentDevice",
             "ModelLoadError",
             "ModelNotRegisteredError",
             "RegisteredModel",

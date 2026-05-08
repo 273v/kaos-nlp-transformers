@@ -11,10 +11,16 @@ See ``docs/internal/prd/kaos-nlp-transformers.md`` and
 """
 
 from kaos_nlp_transformers._version import __version__
-from kaos_nlp_transformers.device import DeviceInfo, SystemDevices, detect_devices
+from kaos_nlp_transformers.device import (
+    DeviceInfo,
+    LatentDevice,
+    SystemDevices,
+    detect_devices,
+)
 from kaos_nlp_transformers.embedding import EmbeddingModel
 from kaos_nlp_transformers.errors import (
     BackendNotInstalledError,
+    DeviceNotReachableError,
     EmbeddingError,
     KaosNLPTransformersError,
     ModelLoadError,
@@ -39,11 +45,13 @@ __all__ = [
     "BackendNotInstalledError",
     "CrossEncoderReranker",
     "DeviceInfo",
+    "DeviceNotReachableError",
     "EmbeddingError",
     "EmbeddingModel",
     "EmbeddingRetriever",
     "KaosNLPTransformersError",
     "KaosNLPTransformersSettings",
+    "LatentDevice",
     "ModelLoadError",
     "ModelNotRegisteredError",
     "RegisteredModel",

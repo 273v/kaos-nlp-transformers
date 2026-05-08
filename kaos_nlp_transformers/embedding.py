@@ -189,6 +189,36 @@ class EmbeddingModel:
         # exception, so a long-running server can safely flip offline policy
         # per request.
         with _offline_env_scope(s.offline):
+            if effective_backend == "model2vec":
+                # Static-embedding backend (audit-04 KNT-301). model2vec's own
+                # ``StaticModel.from_pretrained`` does not accept a revision
+                # argument and calls ``snapshot_download`` without one; to
+                # honor the audit-01 KNT-003 pinned-revision contract we
+                # pre-download via huggingface_hub at the registry SHA and
+                # hand the resulting local path to model2vec. This keeps the
+                # registry the single source of truth even though the
+                # downstream library doesn't expose revision pinning.
+                m2v_backend = _load_model2vec_cached(
+                    model_id=registered.model_id,
+                    revision=registered.revision,
+                    cache_dir=cache_dir,
+                )
+                # Static models are CPU-only by construction; force the
+                # device to CPU so EmbeddingModel.device reports something
+                # truthful instead of inheriting whatever resolve_device
+                # picked from the system snapshot.
+                cpu_device = DeviceInfo(name="CPU", device="cpu", backend="model2vec")
+                logger.info(
+                    "Loaded %s @ %s via model2vec (static, CPU)",
+                    registered.model_id,
+                    registered.revision,
+                )
+                return cls(
+                    registered,
+                    m2v_backend,
+                    device=cpu_device,
+                    backend_name="model2vec",
+                )
             if effective_backend == "sentence-transformers":
                 st_backend = _load_sentence_transformers_cached(
                     model_id=registered.model_id,
@@ -258,6 +288,20 @@ class EmbeddingModel:
                     show_progress_bar=False,
                     convert_to_numpy=True,
                     normalize_embeddings=True,
+                )
+                arr = np.asarray(arr, dtype=np.float32)
+            elif self._backend_name == "model2vec":
+                # ``StaticModel.encode`` returns ``np.ndarray`` directly and
+                # respects the model's own ``normalize`` flag (defaults to
+                # True for the potion family — verified in
+                # audit-04 KNT-301 research). Caller-supplied ``batch_size``
+                # is forwarded; multiprocessing is left to model2vec's own
+                # threshold (default 10000 sentences) so small calls stay
+                # cheap without spawning workers.
+                arr = self._backend.encode(
+                    texts,
+                    batch_size=batch_size,
+                    show_progress_bar=False,
                 )
                 arr = np.asarray(arr, dtype=np.float32)
             else:
@@ -414,26 +458,36 @@ def _l2_normalize(arr: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-_VALID_BACKENDS: frozenset[str] = frozenset({"auto", "fastembed", "sentence-transformers"})
+_VALID_BACKENDS: frozenset[str] = frozenset(
+    {"auto", "fastembed", "sentence-transformers", "model2vec"}
+)
 
 
 def _resolve_backend(requested: str, device: DeviceInfo, registry_backend: str) -> str:
     """Determine which backend to use given user preference and device.
 
-    Audit-02 KNT-107: ``requested`` is validated against the closed set
-    ``{"auto", "fastembed", "sentence-transformers"}``. Unknown values
-    (typos like ``"tensorflow"``) used to silently fall through to the
-    auto path and pick a backend that the user did not ask for; now
-    they raise ``ValueError`` with the valid set.
+    Audit-02 KNT-107: ``requested`` is validated against the closed set of
+    backend names. Unknown values (typos like ``"tensorflow"``) used to
+    silently fall through to the auto path and pick a backend that the
+    user did not ask for; now they raise ``ValueError`` with the valid set.
 
-    Returns 'fastembed' or 'sentence-transformers'.
+    Audit-04 KNT-302: ``"model2vec"`` is honored as both an explicit
+    backend choice and an auto-resolution target. model2vec models are
+    *static* (vocab → vector lookup); they never run on a torch GPU even
+    if one is available, so this resolver leaves the static-vs-attention
+    decision to the registry and ignores ``device`` for them. If the
+    caller forced a non-CPU device for an auto-resolved model2vec model,
+    we still return ``"model2vec"`` — the loader will pin the device to
+    CPU because that is the only thing that makes sense for static.
+
+    Returns 'fastembed', 'sentence-transformers', or 'model2vec'.
     """
     if requested not in _VALID_BACKENDS:
         msg = (
             f"Invalid backend {requested!r}. "
             f"Fix: use one of {sorted(_VALID_BACKENDS)}. "
             "Alternative: leave the setting unset to use the auto-detected "
-            "backend (fastembed on CPU, sentence-transformers on GPU)."
+            "backend (fastembed / model2vec on CPU, sentence-transformers on GPU)."
         )
         raise ValueError(msg)
 
@@ -441,12 +495,18 @@ def _resolve_backend(requested: str, device: DeviceInfo, registry_backend: str) 
         return "fastembed"
     if requested == "sentence-transformers":
         return "sentence-transformers"
+    if requested == "model2vec":
+        return "model2vec"
 
-    # auto: let device + registry guide the choice
+    # auto: registry first, device second.
+    if registry_backend == "model2vec":
+        # Static models — registry decision wins regardless of device.
+        return "model2vec"
     if device.device != "cpu":
-        # GPU → sentence-transformers (unless registry says fastembed-only)
+        # GPU → sentence-transformers (unless registry says fastembed-only).
         return device.backend
-    # CPU → use whatever the registry says
+    # CPU → use whatever the registry says (fastembed for ONNX models,
+    # sentence-transformers for torch-only models).
     return registry_backend
 
 
@@ -550,6 +610,77 @@ def _load_sentence_transformers_cached(
             f"on device {device!r}: {exc}. "
             "Fix: verify the model id is a valid HuggingFace Hub model. "
             f"Alternative: try device='cpu' or a different model."
+        )
+        raise ModelLoadError(msg) from exc
+
+
+@lru_cache(maxsize=8)
+def _load_model2vec_cached(
+    model_id: str,
+    revision: str,
+    cache_dir: str | None = None,
+):
+    """Process-wide cache of loaded model2vec backends.
+
+    Keyed by ``(model_id, revision, cache_dir)``. The revision is part of
+    the cache key AND is honored at download time — see the docstring on
+    the call site in ``EmbeddingModel.load`` for why we route the
+    download through ``huggingface_hub.snapshot_download`` instead of
+    letting model2vec resolve the repo id directly.
+
+    The first call for a given ``(model_id, revision)`` pair triggers a
+    network download (~30 MB for the potion family). Subsequent calls in
+    the same process are O(1).
+    """
+    try:
+        from model2vec import StaticModel  # type: ignore[import-not-found]
+    except ImportError as exc:
+        msg = (
+            "model2vec is not installed. "
+            "Fix: install the model2vec extras via "
+            "`pip install kaos-nlp-transformers[model2vec]` (or "
+            "`uv add kaos-nlp-transformers[model2vec]`). "
+            "Alternative: use the default fastembed model "
+            "BAAI/bge-small-en-v1.5 — slightly slower but already in the "
+            "base install."
+        )
+        raise BackendNotInstalledError(msg) from exc
+
+    # huggingface_hub is a transitive dep of fastembed (already in base
+    # install), so this import does not need its own gate.
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as exc:
+        msg = (
+            "huggingface_hub is not importable. "
+            "Fix: reinstall kaos-nlp-transformers — huggingface_hub is "
+            "pulled in as a transitive of fastembed in the base install."
+        )
+        raise BackendNotInstalledError(msg) from exc
+
+    try:
+        # Pin the revision at download time so the registry SHA is the
+        # single source of truth (audit-01 KNT-003 + audit-04 KNT-301).
+        # ``snapshot_download`` returns the path of the local snapshot,
+        # which we hand to model2vec instead of the repo id.
+        snapshot_kwargs: dict[str, Any] = {
+            "repo_id": model_id,
+            "revision": revision,
+            "repo_type": "model",
+        }
+        if cache_dir:
+            snapshot_kwargs["cache_dir"] = cache_dir
+        local_path = snapshot_download(**snapshot_kwargs)
+        return StaticModel.from_pretrained(local_path)
+    except Exception as exc:
+        msg = (
+            f"Failed to load model {model_id!r} @ {revision} via model2vec: "
+            f"{exc}. "
+            "Fix: verify network access on first download, or pre-cache the "
+            "model with `huggingface-cli download "
+            f"{model_id} --revision {revision}`. "
+            "Alternative: pick BAAI/bge-small-en-v1.5 (default, fastembed) "
+            "to bypass the model2vec extra entirely."
         )
         raise ModelLoadError(msg) from exc
 

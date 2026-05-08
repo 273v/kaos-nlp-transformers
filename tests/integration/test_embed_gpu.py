@@ -175,3 +175,54 @@ def test_force_fastembed_backend():
 
     model = EmbeddingModel.load(device="cpu", backend="fastembed")
     assert model.backend_name == "fastembed"
+
+
+# -- Latent-device contract on a real GPU box ------------------------------
+
+
+@pytest.mark.gpu
+def test_gpu_box_has_no_latent_devices():
+    """On a host where torch sees the GPU, the OS-level probe must not
+    double-count it as latent. This is the contract that makes
+    `kaos-nlp-transformers info` correct on actual GPU machines, not just
+    a CPU-only fallback box where it happens to look right."""
+    _skip_if_no_gpu()
+    from kaos_nlp_transformers.device import _reset_cache_for_tests, detect_devices
+
+    _reset_cache_for_tests()
+    system = detect_devices()
+    assert system.has_gpu is True
+    # The reconciliation step in _detect_latent_devices subtracts reachable
+    # GPUs of each kind from the OS-probe candidates, so a fully torch-aware
+    # box should report zero latents.
+    assert system.has_latent_gpu is False, (
+        f"expected zero latent devices on a CUDA-reachable host; "
+        f"got {[(d.name, d.kind) for d in system.latent_devices]}"
+    )
+
+
+@pytest.mark.gpu
+def test_info_tool_resolves_to_cuda_on_gpu_box():
+    """End-to-end through the MCP info tool: device='auto' on a GPU box
+    must pick CUDA, not CPU, with no latent_devices noise."""
+    import asyncio
+
+    _skip_if_no_gpu()
+    from kaos_core import KaosRuntime
+
+    from kaos_nlp_transformers.device import _reset_cache_for_tests
+    from kaos_nlp_transformers.tools import register_transformers_tools
+
+    _reset_cache_for_tests()
+    runtime = KaosRuntime()
+    register_transformers_tools(runtime)
+    tool = runtime.tools.get_tool("kaos-nlp-transformers-info")
+    assert tool is not None
+
+    result = asyncio.run(tool.execute({}, None))
+    assert result.isError is False
+    payload = result.structuredContent
+    assert payload is not None
+    assert payload["resolved_device"]["device"].startswith("cuda")
+    assert payload["resolved_device"]["backend"] == "sentence-transformers"
+    assert payload["latent_devices"] == []

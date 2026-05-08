@@ -64,6 +64,11 @@ torch = [
 gpu = ["onnxruntime-gpu>=1.19"]
 # Intel OpenVINO acceleration (CPU and Intel GPU).
 openvino = ["optimum[openvino]>=1.20"]
+# model2vec — pure-numpy static embeddings (~500x CPU speedup, no torch).
+# Pulls in numpy + tokenizers + safetensors + a few small libs (joblib,
+# rich, jinja2, tqdm, setuptools); no torch, no scipy, no onnxruntime
+# beyond what the base install already has.
+model2vec = ["model2vec>=0.8.1"]
 mcp = ["kaos-mcp>=0.1.0a1"]
 
 [project.scripts]

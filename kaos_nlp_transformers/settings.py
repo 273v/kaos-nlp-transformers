@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from kaos_core.config.module_settings import ModuleSettings
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import SettingsConfigDict
 
 
@@ -20,6 +20,21 @@ class KaosNLPTransformersSettings(ModuleSettings):
     """Typed settings for kaos-nlp-transformers."""
 
     default_model: str = "BAAI/bge-small-en-v1.5"
+    """Default embedding model loaded by ``EmbeddingModel.load()`` and any
+    consumer that does not pass an explicit ``model_id``. Must be present
+    in ``REGISTRY`` (or ``allow_unregistered`` must be true).
+
+    The whole package now derives its embedding-model default from this
+    field — ``SemanticDedupLevel.__init__`` and the worker MCP tools pull
+    ``model_fields["default_model"].default`` so a single environment
+    override (``KAOS_NLP_TRANSFORMERS_DEFAULT_MODEL``) updates every call
+    site that does not pass an explicit override."""
+
+    default_reranker_model: str = "BAAI/bge-reranker-base"
+    """Default cross-encoder reranker loaded by
+    ``CrossEncoderReranker.load()``. Same single-source-of-truth pattern as
+    ``default_model``: change this and every internal default updates."""
+
     cache_dir: Path | None = None
     offline: bool = False
     allow_unregistered: bool = False
@@ -38,6 +53,27 @@ class KaosNLPTransformersSettings(ModuleSettings):
 
     Values: 'auto' (device-dependent), 'fastembed', 'sentence-transformers'.
     Default 'auto' uses fastembed for CPU, sentence-transformers for GPU.
+    """
+
+    workspace_root: Path | None = None
+    """Filesystem sandbox root for any tool that reads or writes files.
+
+    Mirrors ``kaos_nlp_core.KaosNlpSettings.workspace_root``: ``None`` falls
+    back to ``Path.cwd()`` at use time. Tool callers (CLI, MCP) MUST resolve
+    user-supplied paths against this root and reject anything that escapes
+    it. Set ``KAOS_NLP_TRANSFORMERS_WORKSPACE_ROOT`` to widen or pin the
+    allowed area in production.
+    """
+
+    http_token: SecretStr | None = None
+    """Operator-ack token for ``kaos-nlp-transformers-serve --http``.
+
+    The value is not verified against incoming requests — kaos-mcp's
+    current transport does not enforce bearer-token auth — but the
+    *presence* of any non-empty value is required to start the HTTP
+    transport. The semantics match ``kaos-nlp-core.http_token``: the
+    operator confirms a reverse proxy is doing the actual authentication.
+    ``SecretStr`` redacts the value in logs and ``model_dump`` output.
     """
 
     model_config = SettingsConfigDict(

@@ -28,6 +28,14 @@ from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 logger = get_logger(__name__)
 
 
+# Single-source-of-truth: the dedup level inherits its default model from the
+# package settings field rather than restating the literal. Per
+# docs/python/checklists/03-implement.md (settings-driven defaults), this means
+# ``KAOS_NLP_TRANSFORMERS_DEFAULT_MODEL`` (or a settings override) updates the
+# class default automatically; there is no second place to drift.
+_DEFAULT_DEDUP_MODEL: str = KaosNLPTransformersSettings.model_fields["default_model"].default
+
+
 class SemanticDedupLevel(DedupLevel):
     """Embedding + cosine + agglomerative clustering."""
 
@@ -36,7 +44,7 @@ class SemanticDedupLevel(DedupLevel):
     def __init__(
         self,
         *,
-        model_id: str = "BAAI/bge-small-en-v1.5",
+        model_id: str = _DEFAULT_DEDUP_MODEL,
         distance_threshold: float = 0.10,
         batch_size: int = 64,
         max_chars: int = 8000,

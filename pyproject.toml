@@ -68,6 +68,18 @@ openvino = ["optimum[openvino]>=1.20"]
 # Pulls in numpy + tokenizers + safetensors + a few small libs (joblib,
 # rich, jinja2, tqdm, setuptools); no torch, no scipy, no onnxruntime
 # beyond what the base install already has.
+#
+# Audit-05 KNT-401: the wheel itself ships
+# minishlab/potion-base-8M (~31 MB safetensors + tokenizer) under
+# kaos_nlp_transformers/_vendor/potion-base-8M/. The loader checks
+# the vendored path before snapshot_download, so this single model
+# works offline / air-gapped out of the box once the [model2vec]
+# extra is installed. Other model2vec models still download on
+# first use. Bundling expands the wheel from ~2 MB to ~33 MB; this
+# is a deliberate trade for offline-first deployments. If wheel size
+# becomes a complaint we'll extract the vendored model to a companion
+# package (kaos-nlp-transformers-static-models) per the spaCy
+# /en_core_web_sm pattern.
 model2vec = ["model2vec>=0.8.1"]
 mcp = ["kaos-mcp>=0.1.0a1"]
 

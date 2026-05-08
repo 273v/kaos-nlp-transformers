@@ -1,0 +1,29 @@
+Source:    https://huggingface.co/minishlab/potion-base-8M
+Revision:  bf8b056651a2c21b8d2565580b8569da283cab23
+License:   MIT
+Copyright: (c) MinishLab
+
+Vendored verbatim into kaos-nlp-transformers on 2026-05-08 for offline
+loading via the model2vec backend (see kaos_nlp_transformers.embedding
+._load_model2vec_cached). The on-disk bytes match the upstream HF Hub
+snapshot at the pinned revision; no modifications.
+
+The kl3m / minishlab attribution chain documents the model's provenance:
+distilled from BAAI/bge-base-en-v1.5 via the Tokenlearn + POTION recipe
+with PCA reduction to 256 dim. See
+https://minishlab.github.io/tokenlearn_blogpost/ for the methodology.
+
+The MIT license terms apply to the safetensors weights, the tokenizer,
+and the included config files. No re-licensing — kaos-nlp-transformers
+is Apache-2.0, but vendored third-party artifacts retain their upstream
+licenses.
+
+Files in this directory:
+  config.json                          (~190 B)
+  modules.json                         (~150 B)
+  special_tokens_map.json              (~125 B)
+  tokenizer_config.json                (~1 KB)
+  tokenizer.json                       (~700 KB)
+  vocab.txt                            (~225 KB)
+  model.safetensors                    (~30 MB — the embedding matrix)
+  README.md                            (upstream's README, ~10 KB)

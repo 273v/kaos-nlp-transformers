@@ -144,3 +144,56 @@ def test_repeated_loads_hit_lru_cache():
     a = EmbeddingModel.load("minishlab/potion-retrieval-32M")
     b = EmbeddingModel.load("minishlab/potion-retrieval-32M")
     assert a._backend is b._backend
+
+
+# -- vendored path (audit-05 KNT-401) -------------------------------------
+
+
+def test_vendored_path_detected_for_potion_base_8m():
+    """The bundled vendor dir for potion-base-8M is shipped inside the
+    package. ``_vendored_model_path`` resolves to a real directory with
+    a non-empty model.safetensors."""
+    from kaos_nlp_transformers.embedding import _vendored_model_path
+
+    p = _vendored_model_path("minishlab/potion-base-8M")
+    assert p is not None, "vendored path should be detected"
+    assert (p / "model.safetensors").is_file()
+    assert (p / "model.safetensors").stat().st_size > 1_000_000  # ~30 MB
+    assert (p / "tokenizer.json").is_file()
+    assert (p / "config.json").is_file()
+
+
+def test_vendored_path_returns_none_for_unvendored_models():
+    """Models that are NOT vendored fall through to the snapshot_download
+    path — the vendored detector returns ``None`` so the loader doesn't
+    try to read a non-existent directory."""
+    from kaos_nlp_transformers.embedding import _vendored_model_path
+
+    # potion-retrieval-32M is registered but not vendored
+    assert _vendored_model_path("minishlab/potion-retrieval-32M") is None
+    # bge-small isn't model2vec at all but the detector should still be safe
+    assert _vendored_model_path("BAAI/bge-small-en-v1.5") is None
+
+
+def test_vendored_path_loads_without_network(monkeypatch):
+    """With HF_HUB_OFFLINE=1 set, ``EmbeddingModel.load("minishlab/potion-base-8M")``
+    succeeds — the vendored copy resolves first, so no HF round-trip is
+    attempted. Air-gapped install regression guard."""
+    _skip_if_no_model2vec()
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
+    from kaos_nlp_transformers import EmbeddingModel
+    from kaos_nlp_transformers.embedding import _load_model2vec_cached
+
+    # Bypass any cached backend from a previous test that might have
+    # been loaded via the network path.
+    _load_model2vec_cached.cache_clear()
+    try:
+        model = EmbeddingModel.load("minishlab/potion-base-8M")
+        assert model.backend_name == "model2vec"
+        assert model.dim == 256
+        vecs = model.embed(["hello world", "force majeure clauses excuse performance"])
+        assert vecs.shape == (2, 256)
+        np.testing.assert_allclose(np.linalg.norm(vecs, axis=1), 1.0, atol=1e-5)
+    finally:
+        _load_model2vec_cached.cache_clear()

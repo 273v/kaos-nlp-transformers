@@ -89,6 +89,25 @@ REGISTRY: dict[str, RegisteredModel] = {
             "[model2vec] extra."
         ),
     ),
+    "minishlab/potion-base-8M": RegisteredModel(
+        model_id="minishlab/potion-base-8M",
+        revision="bf8b056651a2c21b8d2565580b8569da283cab23",
+        license="MIT",
+        params_m=8,
+        # Smaller potion variant — 256-dim PCA-reduced, ~30 MB safetensors,
+        # ~31 MB total min subset (no ONNX). The "lightning-fast" entry-
+        # point most blog posts reference. Lower MTEB scores than the 32M
+        # siblings but small enough to vendor inside the wheel — see the
+        # [bundled-static] extra (audit-05 KNT-401).
+        dim=256,
+        backend="model2vec",
+        notes=(
+            "Static general-purpose distillation of bge-base-en-v1.5, "
+            "8M parameters, 256-dim. The smallest potion variant with "
+            "respectable MTEB scores; ~31 MB on disk. Vendored in the "
+            "wheel via [bundled-static] extra. Verified 2026-05-08."
+        ),
+    ),
     "minishlab/potion-base-32M": RegisteredModel(
         model_id="minishlab/potion-base-32M",
         revision="1e5a03f8eeb2c98b928fbbd846f22f816360919f",

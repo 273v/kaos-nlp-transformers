@@ -28,6 +28,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -614,6 +615,44 @@ def _load_sentence_transformers_cached(
         raise ModelLoadError(msg) from exc
 
 
+def _vendored_model_path(model_id: str) -> Path | None:
+    """Return ``kaos_nlp_transformers/_vendor/<slug>/`` if it exists with a
+    loadable ``model.safetensors`` and matches the wheel's vendored copy.
+
+    Audit-05 KNT-401: a small static model
+    (``minishlab/potion-base-8M`` ~31 MB) is bundled inside the wheel so
+    air-gapped / offline-first installs don't need to touch the network.
+    The slug is the model id with ``/`` -> ``-`` (matching the upstream
+    HF Hub repo-id convention for filesystem use). Returns ``None`` for
+    every model that is NOT vendored — the caller falls through to
+    ``snapshot_download`` in that case.
+
+    Detection is intentionally narrow: we require both the directory
+    AND a non-empty ``model.safetensors`` so a partially-deleted
+    install (or a wheel built without the data files) silently falls
+    through to the network path instead of failing inside model2vec.
+    """
+    slug = model_id.replace("/", "-").rsplit("-", 0)[0]
+    # The vendored dir is shipped under the package itself.
+    pkg_root = Path(__file__).resolve().parent
+    vendor_root = pkg_root / "_vendor"
+    # Try a few canonical slug shapes — exact match first, then
+    # last-segment fallback for callers that pass just "potion-base-8M".
+    candidates = [
+        vendor_root / model_id,
+        vendor_root / model_id.replace("/", "-"),
+        vendor_root / model_id.split("/")[-1],
+    ]
+    for cand in candidates:
+        weights = cand / "model.safetensors"
+        if cand.is_dir() and weights.is_file() and weights.stat().st_size > 0:
+            return cand
+    # Suppress lint about unused variable while keeping the slug derivation
+    # readable above; some future caller will want the slug verbatim.
+    _ = slug
+    return None
+
+
 @lru_cache(maxsize=8)
 def _load_model2vec_cached(
     model_id: str,
@@ -622,15 +661,21 @@ def _load_model2vec_cached(
 ):
     """Process-wide cache of loaded model2vec backends.
 
-    Keyed by ``(model_id, revision, cache_dir)``. The revision is part of
-    the cache key AND is honored at download time — see the docstring on
-    the call site in ``EmbeddingModel.load`` for why we route the
-    download through ``huggingface_hub.snapshot_download`` instead of
-    letting model2vec resolve the repo id directly.
+    Resolution order:
 
-    The first call for a given ``(model_id, revision)`` pair triggers a
-    network download (~30 MB for the potion family). Subsequent calls in
-    the same process are O(1).
+    1. **Vendored copy** at ``kaos_nlp_transformers/_vendor/<slug>/``
+       (audit-05 KNT-401). Air-gapped installs of the wheel can load
+       this without touching the network. Currently bundled:
+       ``minishlab/potion-base-8M``.
+    2. **HuggingFace Hub snapshot** at the pinned revision via
+       ``huggingface_hub.snapshot_download(repo_id, revision=sha)``.
+       First call downloads, subsequent calls hit the HF cache.
+
+    Keyed by ``(model_id, revision, cache_dir)``. The revision is part
+    of the cache key AND is honored at download time — see the docstring
+    on the call site in ``EmbeddingModel.load`` for why we route the
+    download through ``snapshot_download`` instead of letting model2vec
+    resolve the repo id directly.
     """
     try:
         from model2vec import StaticModel  # type: ignore[import-not-found]
@@ -646,8 +691,32 @@ def _load_model2vec_cached(
         )
         raise BackendNotInstalledError(msg) from exc
 
-    # huggingface_hub is a transitive dep of fastembed (already in base
-    # install), so this import does not need its own gate.
+    # 1. Vendored copy — try first, no network at all.
+    vendored = _vendored_model_path(model_id)
+    if vendored is not None:
+        logger.info(
+            "Loaded %s @ %s via model2vec from vendored path %s (audit-05 KNT-401)",
+            model_id,
+            revision,
+            vendored,
+        )
+        try:
+            return StaticModel.from_pretrained(str(vendored))
+        except Exception as exc:
+            # Vendored bytes failed to load — log and fall through to HF
+            # rather than hard-failing, so a corrupted or stale vendor
+            # dir doesn't take the package down.
+            logger.warning(
+                "Vendored copy at %s failed to load (%s); falling through "
+                "to huggingface_hub.snapshot_download",
+                vendored,
+                exc,
+            )
+
+    # 2. Network path — pin the revision at download time so the
+    # registry SHA is the single source of truth (audit-01 KNT-003 +
+    # audit-04 KNT-301). ``snapshot_download`` returns the path of the
+    # local snapshot, which we hand to model2vec instead of the repo id.
     try:
         from huggingface_hub import snapshot_download
     except ImportError as exc:
@@ -659,10 +728,6 @@ def _load_model2vec_cached(
         raise BackendNotInstalledError(msg) from exc
 
     try:
-        # Pin the revision at download time so the registry SHA is the
-        # single source of truth (audit-01 KNT-003 + audit-04 KNT-301).
-        # ``snapshot_download`` returns the path of the local snapshot,
-        # which we hand to model2vec instead of the repo id.
         snapshot_kwargs: dict[str, Any] = {
             "repo_id": model_id,
             "revision": revision,

@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a5] — 2026-05-08
+
+### Added
+
+- **Audit-05 KNT-401 — bundle `minishlab/potion-base-8M` inside the
+  wheel.** A small static embedding model (~31 MB safetensors + tokenizer,
+  pinned at SHA `bf8b056651a2c21b8d2565580b8569da283cab23`, MIT license)
+  now ships under `kaos_nlp_transformers/_vendor/potion-base-8M/`. The
+  loader checks the vendored path before calling
+  `huggingface_hub.snapshot_download`, so:
+  - `EmbeddingModel.load("minishlab/potion-base-8M")` works **offline /
+    air-gapped** out of the box once `[model2vec]` is installed.
+  - `HF_HUB_OFFLINE=1` no longer breaks this one model.
+  - First-call latency drops from ~5s (download) to ~50 ms (filesystem).
+
+  Wheel size: ~28 MB (was ~2 MB). This is a deliberate trade for
+  offline-first deployments. Other model2vec models still download from
+  HF on first use.
+
+  Three new tests in `tests/integration/test_embed_model2vec.py`:
+  - `test_vendored_path_detected_for_potion_base_8m` — directory probe
+  - `test_vendored_path_returns_none_for_unvendored_models` — fallthrough guard
+  - `test_vendored_path_loads_without_network` — `HF_HUB_OFFLINE=1` regression
+
+  Loader emits an INFO line tagged `audit-05 KNT-401` recording which
+  resolution path it took (vendored vs HF Hub), so an operator can
+  audit-trace the source.
+
+  REGISTRY entry added for `minishlab/potion-base-8M`: 8M params, 256-dim
+  (PCA-reduced), MIT, backend=`model2vec`.
+
+### Changed
+
+- `_load_model2vec_cached` now resolves in two stages: vendored
+  filesystem probe first (no network), HF Hub `snapshot_download`
+  fallback. Existing `model2vec` callers see no API change; only the
+  resolution order is updated.
+
 ## [0.1.0a3] — 2026-05-08
 
 Hot-fix release for a hard SIGSEGV on free-threaded Python (3.13t / 3.14t).

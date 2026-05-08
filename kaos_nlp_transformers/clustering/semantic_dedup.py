@@ -22,6 +22,8 @@ from typing import ClassVar
 from kaos_content.dedup.types import DedupCluster, DedupDocument, DedupLevel
 from kaos_core.logging import get_logger
 
+from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
+
 logger = get_logger(__name__)
 
 
@@ -38,6 +40,8 @@ class SemanticDedupLevel(DedupLevel):
         batch_size: int = 64,
         max_chars: int = 8000,
         device: str | None = None,
+        backend: str | None = None,
+        settings: KaosNLPTransformersSettings | None = None,
     ) -> None:
         """
         Args:
@@ -57,19 +61,37 @@ class SemanticDedupLevel(DedupLevel):
                 ``None`` defers to the package settings (default
                 ``"auto"``). Pin to ``"cpu"`` to force fastembed even
                 on GPU hosts.
+            backend: Forwarded to ``EmbeddingModel.load(backend=...)``.
+            settings: Module settings forwarded to ``EmbeddingModel.load``
+                (audit-01 KNT-004 — cache/offline/device policy injection).
         """
         self._model_id = model_id
         self._distance_threshold = distance_threshold
         self._batch_size = batch_size
         self._max_chars = max_chars
         self._device = device
+        self._backend = backend
+        self._settings = settings
 
     def find_clusters(
         self,
         documents: list[DedupDocument],
     ) -> list[DedupCluster]:
-        from scipy.cluster.hierarchy import fcluster, linkage
-        from scipy.spatial.distance import pdist
+        # Audit-01 KNT-002: scipy is gated on the `[clustering]` extra. Raise
+        # an actionable install-hint error rather than letting the import fail
+        # with a cryptic ModuleNotFoundError.
+        try:
+            from scipy.cluster.hierarchy import fcluster, linkage
+            from scipy.spatial.distance import pdist
+        except ImportError as exc:
+            msg = (
+                "SemanticDedupLevel requires scipy. "
+                "Fix: install kaos-nlp-transformers[clustering] (or "
+                "pip install scipy>=1.14.1 directly). "
+                "Alternative: use kaos_nlp_core.fuzzy_hashing for non-semantic "
+                "near-duplicate detection without scipy."
+            )
+            raise ImportError(msg) from exc
 
         from kaos_nlp_transformers.embedding import EmbeddingModel
 
@@ -83,7 +105,12 @@ class SemanticDedupLevel(DedupLevel):
         if len(valid) < 2:
             return []
 
-        model = EmbeddingModel.load(self._model_id, device=self._device)
+        model = EmbeddingModel.load(
+            self._model_id,
+            device=self._device,
+            backend=self._backend,
+            settings=self._settings,
+        )
         embeddings = model.embed(texts, batch_size=self._batch_size)
 
         dists = pdist(embeddings, metric="cosine")

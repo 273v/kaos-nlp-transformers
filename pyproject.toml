@@ -5,69 +5,104 @@ build-backend = "hatchling.build"
 [project]
 name = "kaos-nlp-transformers"
 dynamic = ["version"]
-description = "Dense embeddings and small-model inference for the Kelvin Agentic OS"
+description = "Dense embeddings and small-model inference for the Kelvin Agentic OS — fastembed-first ONNX, optional torch / GPU / OpenVINO backends"
 readme = "README.md"
 requires-python = ">=3.13"
-license = { text = "LicenseRef-Proprietary" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
-    { name = "273 Ventures LLC", email = "it@273ventures.com" },
+  { name = "273 Ventures LLC", email = "it@273ventures.com" },
+]
+maintainers = [
+  { name = "Michael Bommarito", email = "mike@273ventures.com" },
+]
+keywords = [
+  "embeddings",
+  "fastembed",
+  "onnx",
+  "sentence-transformers",
+  "retrieval",
+  "agentic",
+  "mcp",
+  "kaos",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Typing :: Typed",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
 ]
 
 dependencies = [
-    "kaos-core>=0.1.0",
-    "kaos-content>=0.1.0",
-    "kaos-nlp-core>=0.1.0",
-    "numpy>=2.0",
-    "fastembed>=0.6",
+  "kaos-core>=0.1.0a1",
+  "kaos-content>=0.1.0a1",
+  "kaos-nlp-core>=0.1.0a1",
+  "numpy>=2.1",
+  "fastembed>=0.6",
 ]
 
 [project.optional-dependencies]
-# PyTorch + sentence-transformers — required for GPU embedding and any
-# model not in fastembed's ONNX registry.
+# scipy gates SemanticDedupLevel (audit-01 KNT-002). The base install
+# does not require scipy; only consumers of the dedup level pull it in.
+clustering = ["scipy>=1.14.1"]
+# PyTorch + sentence-transformers — required for any model not in
+# fastembed's ONNX registry, and for GPU inference paths.
 torch = [
-    "torch>=2.5",
-    "transformers>=4.45",
-    "sentence-transformers>=5.0",
+  "torch>=2.5",
+  "transformers>=4.45",
+  "sentence-transformers>=5.0",
 ]
 # ONNX Runtime GPU — NVIDIA CUDA acceleration for fastembed.
 # NOTE: onnxruntime-gpu conflicts with onnxruntime; install one or the other.
 gpu = ["onnxruntime-gpu>=1.19"]
 # Intel OpenVINO acceleration (CPU and Intel GPU).
 openvino = ["optimum[openvino]>=1.20"]
-mcp = ["kaos-mcp>=0.1.0"]
+mcp = ["kaos-mcp>=0.1.0a1"]
 
 [project.scripts]
 kaos-nlp-transformers = "kaos_nlp_transformers.cli:main"
 kaos-nlp-transformers-serve = "kaos_nlp_transformers.serve:main"
 
+[project.urls]
+Homepage = "https://kelvin.legal"
+Documentation = "https://docs.kelvin.legal"
+Repository = "https://github.com/273v/kaos-nlp-transformers"
+Issues = "https://github.com/273v/kaos-nlp-transformers/issues"
+Changelog = "https://github.com/273v/kaos-nlp-transformers/blob/main/CHANGELOG.md"
+
 [dependency-groups]
+# Cross-package dev baseline matches kaos-graph 0.1.0a2 / kaos-tabular 0.1.0a1:
+# pytest 9, pytest-asyncio 1.3, pytest-cov 7.1, ty 0.0.34.
 dev = [
-    "pytest>=8.3.5",
-    "pytest-asyncio>=0.26.0",
-    "pytest-cov>=6.0.0",
-    "ruff>=0.11.0",
-    "ty>=0.0.1a17",
+  "pytest>=9.0.3",
+  "pytest-asyncio>=1.3.0",
+  "pytest-cov>=7.1.0",
+  "ruff>=0.15.12",
+  "ty>=0.0.34,<0.1",
 ]
 
 [tool.hatch.version]
 path = "kaos_nlp_transformers/_version.py"
 
 [tool.hatch.build.targets.sdist]
+# Sdist excludes /tests and CLAUDE.md. CLAUDE.md references monorepo-only
+# checklists; integration tests need network/GPU/cache fixtures. Source code,
+# license, changelog, and packaging metadata are enough for source-build
+# verification on PyPI.
 include = [
-    "/kaos_nlp_transformers",
-    "/README.md",
-    "/CLAUDE.md",
-    "/tests",
+  "/kaos_nlp_transformers",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/LICENSE",
+  "/NOTICE",
+  "/pyproject.toml",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -77,9 +112,17 @@ packages = ["kaos_nlp_transformers"]
 minversion = "8.0"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+]
 markers = [
-    "integration: end-to-end checks requiring network or model downloads",
-    "unit: focused unit checks",
+  "unit: focused unit checks",
+  "integration: end-to-end checks (real model downloads, GPU)",
+  "live: requires live network access (HuggingFace Hub model fetch)",
+  "gpu: requires CUDA / Apple Silicon / OpenVINO accelerator",
 ]
 
 [tool.ruff]
@@ -98,6 +141,9 @@ include = ["kaos_nlp_transformers", "tests"]
 [tool.uv]
 package = true
 
+# Editable sibling paths for the monorepo only. Stripped at promotion time
+# per docs/oss/00-overview/decisions.md D015 — the per-module repo's
+# pyproject.toml uses pure PyPI version pins.
 [tool.uv.sources]
 kaos-core = { path = "../kaos-core", editable = true }
 kaos-content = { path = "../kaos-content", editable = true }

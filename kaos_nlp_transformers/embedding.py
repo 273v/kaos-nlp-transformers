@@ -24,6 +24,7 @@ raise the same error unless ``allow_unregistered`` is set in settings.
 from __future__ import annotations
 
 import importlib
+import os
 from functools import lru_cache
 from typing import Any
 
@@ -165,15 +166,27 @@ class EmbeddingModel:
         # --- Load backend ---
         cache_dir = str(s.cache_dir) if s.cache_dir else None
 
+        # Audit-01 KNT-005: enforce offline mode at the boundary. Both
+        # fastembed and sentence-transformers route through huggingface_hub;
+        # setting the documented env vars makes them refuse network access
+        # and raise on missing local files instead of silently downloading.
+        # Set unconditionally each call (idempotent) so a settings change
+        # mid-process is honored.
+        if s.offline:
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
         if effective_backend == "sentence-transformers":
             st_backend = _load_sentence_transformers_cached(
                 model_id=registered.model_id,
+                revision=registered.revision,
                 device=device_info.device,
                 cache_dir=cache_dir,
             )
             logger.info(
-                "Loaded %s via sentence-transformers on %s (%s)",
+                "Loaded %s @ %s via sentence-transformers on %s (%s)",
                 registered.model_id,
+                registered.revision,
                 device_info.device,
                 device_info.name,
             )
@@ -184,14 +197,21 @@ class EmbeddingModel:
                 backend_name="sentence-transformers",
             )
         else:
+            # fastembed pins revisions in its own model registry and does not
+            # accept a runtime revision override (audit-01 KNT-003). The cache
+            # key still includes registered.revision so that a registry change
+            # to a different SHA invalidates the lru_cache entry, even though
+            # fastembed itself loads the version baked into its release.
             fe_backend = _load_fastembed_cached(
                 model_id=registered.model_id,
+                revision=registered.revision,
                 cache_dir=cache_dir,
                 providers=_onnx_providers_for_device(device_info),
             )
             logger.info(
-                "Loaded %s via fastembed on %s",
+                "Loaded %s (registry revision %s; fastembed pins its own) on %s",
                 registered.model_id,
+                registered.revision,
                 device_info.device,
             )
             return cls(
@@ -294,6 +314,7 @@ def _onnx_providers_for_device(device: DeviceInfo) -> tuple[str, ...] | None:
 @lru_cache(maxsize=8)
 def _load_fastembed_cached(
     model_id: str,
+    revision: str,
     cache_dir: str | None,
     providers: tuple[str, ...] | None = None,
 ):
@@ -303,6 +324,12 @@ def _load_fastembed_cached(
     runtime sessions, both of which are heavyweight. Caching here
     means repeated ``EmbeddingModel.load(same_id)`` calls in the same
     process are O(1).
+
+    Note: ``revision`` is part of the cache key but NOT passed to
+    fastembed. fastembed maintains its own model registry with a fixed
+    revision per release; runtime revision override is not supported.
+    Registry mismatches still invalidate the cache (different revision →
+    different cache key → fresh load).
     """
     try:
         from fastembed import TextEmbedding  # type: ignore[import-not-found]
@@ -337,13 +364,14 @@ def _load_fastembed_cached(
 @lru_cache(maxsize=8)
 def _load_sentence_transformers_cached(
     model_id: str,
+    revision: str,
     device: str,
     cache_dir: str | None = None,
 ):
     """Process-wide cache of loaded sentence-transformers backends.
 
-    Keyed by (model_id, device, cache_dir) so different devices produce
-    separate cached models.
+    Keyed by (model_id, revision, device, cache_dir) so different
+    devices and pinned revisions produce separate cached models.
     """
     try:
         sentence_transformers = importlib.import_module("sentence_transformers")
@@ -358,7 +386,7 @@ def _load_sentence_transformers_cached(
         raise BackendNotInstalledError(msg) from exc
 
     try:
-        kwargs: dict[str, Any] = {"device": device}
+        kwargs: dict[str, Any] = {"device": device, "revision": revision}
         if cache_dir:
             kwargs["cache_folder"] = cache_dir
         SentenceTransformer = sentence_transformers.SentenceTransformer

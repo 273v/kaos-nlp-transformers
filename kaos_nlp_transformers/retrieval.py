@@ -12,7 +12,6 @@ it implements lives in kaos-nlp-core.
 
 from __future__ import annotations
 
-import importlib
 from collections import OrderedDict
 from typing import Any
 
@@ -21,6 +20,7 @@ from kaos_nlp_core.retrieval.protocol import corpus_unit_passage_uri
 from kaos_nlp_core.search import SearchHit
 
 from kaos_nlp_transformers.embedding import EmbeddingModel
+from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 
 
 def _group_corpus_units_for_embedding(
@@ -226,6 +226,9 @@ class EmbeddingRetriever:
         metadata_list: list[dict[str, Any]] | None = None,
         model_id: str | None = None,
         batch_size: int = 32,
+        device: str | None = None,
+        backend: str | None = None,
+        settings: KaosNLPTransformersSettings | None = None,
     ) -> EmbeddingRetriever:
         """Build a retriever by embedding a list of texts.
 
@@ -236,11 +239,16 @@ class EmbeddingRetriever:
             metadata_list: Optional metadata dicts.
             model_id: Model to load (defaults to registry default).
             batch_size: Batch size for embedding inference.
+            device: Device override forwarded to ``EmbeddingModel.load``.
+            backend: Backend override forwarded to ``EmbeddingModel.load``.
+            settings: Module settings override forwarded to
+                ``EmbeddingModel.load`` (audit-01 KNT-004 — typed
+                cache/offline/device policy injection at the edge).
         """
         if doc_ids is None:
             doc_ids = list(range(len(texts)))
 
-        em = EmbeddingModel.load(model_id)
+        em = EmbeddingModel.load(model_id, device=device, backend=backend, settings=settings)
         vecs = em.embed(texts, batch_size=batch_size)
         return cls(
             embeddings=vecs,
@@ -294,47 +302,56 @@ class EmbeddingRetriever:
         group_by: str | None = None,
         model_id: str | None = None,
         batch_size: int = 32,
+        device: str | None = None,
+        backend: str | None = None,
+        settings: KaosNLPTransformersSettings | None = None,
     ) -> EmbeddingRetriever:
-        """Build an embedding retriever from a kaos-ml-core ``Corpus``.
+        """Build an embedding retriever from any structurally-compatible corpus.
 
-        Uses ``kaos_ml_core.features.embed_corpus`` for vectorization
-        (which in turn uses ``EmbeddingModel`` from this package).
-        Provenance is threaded from ``CorpusUnit`` fields into
-        ``external_id`` and ``metadata`` on each result.
+        Audit-01 KNT-001: this method accepts any corpus object that satisfies
+        the structural protocol below; it does NOT import ``kaos-ml-core``
+        (the documented consumer). The DAG flows downward only.
+
+        Required of ``corpus``:
+
+        - Iterable yielding "unit" objects with attributes ``row`` (int),
+          ``text`` (str), ``doc_uri`` (str), ``page`` (int | None),
+          ``section_ref`` (str | None), and ``section_title`` (str | None).
+        - Either an ``embed(model=..., batch_size=...) -> np.ndarray`` method
+          (preferred — typically with caching), or no method at all, in which
+          case the texts are embedded here directly.
 
         Args:
-            corpus: A ``kaos_ml_core.Corpus`` instance.
-            group_by: Optional attribute name on ``CorpusUnit`` to group
-                by before indexing (e.g. ``"section_ref"``).  When set,
-                units sharing the same attribute value are concatenated
-                into one document whose ``external_id`` is
-                ``{doc_uri}#{group_value}``.  The grouped text is
-                embedded (not individual units).
-            model_id: Embedding model id.  Defaults to the registry
-                default (``BAAI/bge-small-en-v1.5``).
+            corpus: A corpus object satisfying the protocol above.
+                ``kaos_ml_core.Corpus`` is the canonical consumer, but any
+                object with the same shape works.
+            group_by: Optional attribute name on each unit to group by
+                before indexing (e.g. ``"section_ref"``). When set, units
+                sharing the same attribute value are concatenated into one
+                document whose ``external_id`` is ``{doc_uri}#{group_value}``.
+                The grouped text is embedded (not individual units).
+            model_id: Embedding model id. Defaults to the registry default
+                (``BAAI/bge-small-en-v1.5``).
             batch_size: Batch size for embedding inference.
-
-        Example::
-
-            from kaos_ml_core import Corpus
-            corpus = Corpus.from_documents([doc1, doc2])
-            retriever = EmbeddingRetriever.from_corpus(corpus)
+            device: Device override forwarded to ``EmbeddingModel.load``.
+            backend: Backend override forwarded to ``EmbeddingModel.load``.
+            settings: Module settings override forwarded to
+                ``EmbeddingModel.load`` (audit-01 KNT-004).
         """
-        em = EmbeddingModel.load(model_id)
+        em = EmbeddingModel.load(model_id, device=device, backend=backend, settings=settings)
 
         if group_by is not None:
             doc_ids, texts, external_ids, metadata_list = _group_corpus_units_for_embedding(
                 corpus, group_by
             )
         else:
-            # Use Corpus.embed() if available (caches by model+batch_size).
+            # Prefer corpus.embed() when available (typically caches by
+            # model+batch_size). Otherwise embed the unit texts directly —
+            # this avoids the historical upward import of kaos_ml_core.features.
             if hasattr(corpus, "embed"):
                 vecs = corpus.embed(model=model_id, batch_size=batch_size)
             else:
-                features = importlib.import_module("kaos_ml_core.features")
-                _embed_corpus = features.embed_corpus
-
-                vecs = _embed_corpus(corpus, model=model_id, batch_size=batch_size)
+                vecs = em.embed([u.text for u in corpus], batch_size=batch_size)
 
             doc_ids: list[int] = []
             texts: list[str] = []

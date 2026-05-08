@@ -373,6 +373,7 @@ def test_semantic_dedup_threshold_validated():
 def test_semantic_dedup_returns_real_similarity(monkeypatch):
     """With three near-duplicate embeddings, the cluster's similarity must
     be in (0.5, 1.0) — not the inherited 1.0 default."""
+    pytest.importorskip("scipy", reason="SemanticDedupLevel requires the [clustering] extra")
     from kaos_content.dedup.types import DedupDocument
 
     from kaos_nlp_transformers.clustering import semantic_dedup as sd
@@ -582,6 +583,7 @@ def test_semantic_dedup_threshold_monotonicity(monkeypatch):
     INCREASE the total number of clustered members. (Membership is a
     monotonic non-increasing function of distance_threshold under
     average-linkage hierarchical clustering.)"""
+    pytest.importorskip("scipy", reason="SemanticDedupLevel requires the [clustering] extra")
     from kaos_content.dedup.types import DedupDocument
 
     from kaos_nlp_transformers.clustering import semantic_dedup as sd

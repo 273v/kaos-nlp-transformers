@@ -34,8 +34,8 @@ jobs:
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies
-        run: uv sync --group dev --python 3.13
+      - name: Install dependencies (clustering extra so ty resolves scipy)
+        run: uv sync --group dev --extra clustering --python 3.13
 
       - name: Ruff format check
         run: uv run ruff format --check kaos_nlp_transformers/ tests/
@@ -67,8 +67,8 @@ jobs:
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies (needed by the local ty hook)
-        run: uv sync --group dev --python 3.13
+      - name: Install dependencies (clustering extra so the ty hook resolves scipy)
+        run: uv sync --group dev --extra clustering --python 3.13
 
       - name: Run pre-commit
         run: uvx pre-commit run --all-files --show-diff-on-failure

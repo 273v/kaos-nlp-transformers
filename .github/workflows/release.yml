@@ -37,8 +37,8 @@ jobs:
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies
-        run: uv sync --group dev --python 3.13
+      - name: Install dependencies (clustering extra so ty resolves scipy)
+        run: uv sync --group dev --extra clustering --python 3.13
 
       - name: Verify version matches tag
         id: version

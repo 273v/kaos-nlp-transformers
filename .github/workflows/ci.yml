@@ -268,7 +268,8 @@ jobs:
 
           # Device detection runs and returns the expected dataclass.
           devs = detect_devices()
-          assert hasattr(devs, 'cuda_visible') and hasattr(devs, 'platform_name')
+          assert hasattr(devs, 'devices') and hasattr(devs, 'best') and hasattr(devs, 'has_gpu')
+          assert any(d.device == 'cpu' for d in devs.devices)
 
           # Real ML: load + embed + cosine similarity.
           model = EmbeddingModel.load('BAAI/bge-small-en-v1.5')

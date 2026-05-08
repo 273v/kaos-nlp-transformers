@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a3] — 2026-05-08
+
+Hot-fix release for a hard SIGSEGV on free-threaded Python (3.13t / 3.14t).
+One audit-03 finding (KNT-201) closed with five regression tests pinning
+the runtime guard.
+
+### Security / Correctness
+
+- **KNT-201 (HIGH) — runtime guard against free-threaded Python.**
+  ``import fastembed`` triggers SIGSEGV (exit 139) inside
+  ``py_rust_stemmers``' module init under ``Py_GIL_DISABLED`` because the
+  upstream Rust/PyO3 extension hasn't declared free-threaded support.
+  ``EmbeddingModel.load`` and ``CrossEncoderReranker.load`` now check
+  ``sys._is_gil_enabled()`` BEFORE attempting any backend import; if the
+  interpreter is free-threaded they raise
+  ``BackendNotInstalledError`` with a fix-and-track message instead of
+  letting the segfault happen.
+
+  **User-visible behavior change.** Code that previously crashed silently
+  on Python 3.14t now raises a clean ``BackendNotInstalledError`` with:
+
+  - what's wrong (fastembed's transitive py_rust_stemmers crashes
+    under Py_GIL_DISABLED; sentence-transformers chain similarly
+    affected via tokenizers + transformers)
+  - how to fix (use the GIL-enabled build of Python 3.13 or 3.14, NOT
+    the 3.14t free-threaded variant)
+  - alternative (track upstream py_rust_stemmers / tokenizers
+    free-threaded support; this guard is removed once those wheels
+    declare ``Py_GIL_DISABLED``)
+
+  Test pins:
+  ``test_check_gil_enabled_passes_on_normal_build``,
+  ``test_check_gil_enabled_refuses_on_free_threaded``,
+  ``test_embedding_model_load_calls_the_guard``,
+  ``test_cross_encoder_reranker_load_calls_the_guard``,
+  ``test_is_free_threaded_python_helper``.
+
+### Changed
+
+- **Compatibility & status table** in README — Python 3.14t row flipped
+  from "informational" to **NOT supported pending upstream**, with a
+  link to the tracker. Same for any future ``Py_GIL_DISABLED`` build
+  (3.13t, 3.15t).
+
+[0.1.0a3]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a2...v0.1.0a3
+
 ## [0.1.0a2] — 2026-05-08
 
 Audit-02 follow-up release. Seven findings (KNT-101..KNT-107) closed, all
@@ -208,6 +254,6 @@ fixed with regression tests in `tests/unit/test_audit_01.py`).
 This release is the first to ship under the Apache License 2.0. Earlier
 internal versions were proprietary.
 
-[Unreleased]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a2...HEAD
+[Unreleased]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a3...HEAD
 [0.1.0a2]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a1...v0.1.0a2
 [0.1.0a1]: https://github.com/273v/kaos-nlp-transformers/releases/tag/v0.1.0a1

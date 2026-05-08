@@ -95,9 +95,17 @@ class CrossEncoderReranker:
                 or is not in ``RERANKER_REGISTRY`` and
                 ``settings.allow_unregistered`` is false.
             BackendNotInstalledError: If sentence-transformers is not
-                installed.
+                installed, OR if running on a free-threaded Python build
+                (audit-03 KNT-201 — tokenizers / transformers chain not
+                yet Py_GIL_DISABLED safe).
             ModelLoadError: If the model fails to load.
         """
+        # Audit-03 KNT-201: same guard as EmbeddingModel.load — refuse
+        # on free-threaded Python before attempting any backend import.
+        from kaos_nlp_transformers.embedding import _check_gil_enabled
+
+        _check_gil_enabled()
+
         s = settings if settings is not None else KaosNLPTransformersSettings()
         target = model_id or DEFAULT_RERANKER_MODEL
 

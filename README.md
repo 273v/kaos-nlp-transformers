@@ -125,7 +125,7 @@ kaos-nlp-transformers-serve          # placeholder; MCP wiring in 0.1.0a2+
 
 | Aspect | |
 |---|---|
-| **Python** | 3.13, 3.14 (informational matrix entries for 3.14t free-threaded and 3.15-dev). Pure-Python `py3-none-any` wheel. |
+| **Python** | 3.13, 3.14 — GIL builds only. Free-threaded builds (3.13t / 3.14t / `Py_GIL_DISABLED`) are **not supported**: `EmbeddingModel.load` / `CrossEncoderReranker.load` raise `BackendNotInstalledError` because fastembed's transitive `py_rust_stemmers` (and the `tokenizers` + `transformers` chain on the `[torch]` path) segfault during module init without the GIL. Pending upstream `Py_GIL_DISABLED` declarations from those C extensions; the guard is removed once that lands. Pure-Python `py3-none-any` wheel. |
 | **OS** | Any platform with a CPython 3.13+ wheel and ONNX Runtime support — Linux x86_64 + aarch64 (manylinux), macOS x86_64 + arm64, Windows x86_64. |
 | **Maturity** | Alpha. The public API is documented in `kaos_nlp_transformers.__all__`. |
 | **Stability policy** | Pre-1.0: minor bumps may change behaviour. Every change is documented in [`CHANGELOG.md`](CHANGELOG.md). |

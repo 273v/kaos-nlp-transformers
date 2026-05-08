@@ -120,6 +120,15 @@ class EmbeddingModel:
             ModelLoadError: If the backend fails to download or load the
                 model.
         """
+        # Audit-03 KNT-201: refuse loudly on free-threaded Python builds.
+        # fastembed pulls py_rust_stemmers (Rust/PyO3) for sparse BM25, and
+        # py_rust_stemmers crashes during module init under Py_GIL_DISABLED
+        # (SIGSEGV, exit 139). The sentence-transformers path has the same
+        # exposure via the tokenizers + transformers stack. Better to fail
+        # with a clear message at the API boundary than segfault inside
+        # `import fastembed`.
+        _check_gil_enabled()
+
         s = settings if settings is not None else KaosNLPTransformersSettings()
         target = model_id or s.default_model
         req_device = device or s.device
@@ -287,6 +296,60 @@ class EmbeddingModel:
         # there. The cost is one np.linalg.norm + division per call (≈1µs per
         # row at 384-dim), which is far below inference cost (~1ms/row CPU).
         return _l2_normalize(arr)
+
+
+# ---------------------------------------------------------------------------
+# Free-threaded Python guard (audit-03 KNT-201)
+# ---------------------------------------------------------------------------
+
+
+def _is_free_threaded_python() -> bool:
+    """True when running under a Py_GIL_DISABLED interpreter (3.13t / 3.14t).
+
+    ``sys._is_gil_enabled()`` is part of the stable public-ish API since
+    CPython 3.13 (PEP 703); on older builds without GIL-disable support
+    the function does not exist, in which case we treat the interpreter
+    as GIL-enabled.
+    """
+    import sys as _sys
+
+    is_gil_enabled_fn = getattr(_sys, "_is_gil_enabled", None)
+    if is_gil_enabled_fn is None:
+        return False
+    return not bool(is_gil_enabled_fn())
+
+
+def _check_gil_enabled() -> None:
+    """Raise :class:`BackendNotInstalledError` on free-threaded Python.
+
+    The fastembed backend pulls ``py_rust_stemmers`` (Rust/PyO3) for its
+    sparse BM25 path. As of 2026-05-08 ``py_rust_stemmers`` does not
+    declare free-threaded support, and its module-init code crashes with
+    SIGSEGV when loaded on Python 3.14t. The sentence-transformers
+    backend has the same exposure via the ``tokenizers`` + ``transformers``
+    chain.
+
+    Audit-03 KNT-201: refuse at the API boundary so the user gets a
+    clear error pointing at the upstream tracker rather than a hard
+    segfault. When py_rust_stemmers / tokenizers / transformers ship
+    Py_GIL_DISABLED support, this check is removed (no version pin
+    needed; the upstream wheels resolve at runtime).
+    """
+    if _is_free_threaded_python():
+        msg = (
+            "kaos-nlp-transformers cannot load on a free-threaded Python "
+            "build (3.13t / 3.14t / etc.). The fastembed backend's "
+            "transitive dependency py_rust_stemmers crashes (SIGSEGV) "
+            "during module init under Py_GIL_DISABLED, and the "
+            "sentence-transformers backend has the same exposure via "
+            "tokenizers + transformers. "
+            "Fix: switch to the GIL-enabled build of Python 3.13 or 3.14 "
+            "(`uv python install 3.14`, NOT 3.14t). "
+            "Alternative: track upstream py_rust_stemmers / tokenizers "
+            "free-threaded support; this guard is removed once those "
+            "wheels declare Py_GIL_DISABLED."
+        )
+        raise BackendNotInstalledError(msg)
 
 
 # ---------------------------------------------------------------------------

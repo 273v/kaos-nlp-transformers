@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] — KNT-601 Rust backend cutover
+## [0.2.0a1] — 2026-05-09 — KNT-601 Rust backend cutover
 
 Audit-07 release. The Python ``fastembed`` wrapper is **retired
 entirely**; embedding and reranker inference now go through an in-tree

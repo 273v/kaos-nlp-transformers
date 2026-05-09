@@ -623,7 +623,7 @@ def _load_model2vec_cached(
     resolve the repo id directly.
     """
     try:
-        from model2vec import StaticModel  # type: ignore[import-not-found]
+        from model2vec import StaticModel
     except ImportError as exc:
         msg = (
             "model2vec is not installed. "

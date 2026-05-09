@@ -34,8 +34,13 @@ jobs:
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies (clustering extra so ty resolves scipy)
-        run: uv sync --group dev --extra clustering --python 3.13
+      - name: Install dependencies (clustering + model2vec extras so ty resolves both)
+        # ty type-checks every imported module; missing optional-extra
+        # imports surface as `unresolved-import` even though the source
+        # gates them behind `try: ... except ImportError`. Installing the
+        # extras here keeps the source clean (no per-extra ignore comments
+        # that would also need to fire under different installs).
+        run: uv sync --group dev --extra clustering --extra model2vec --python 3.13
 
       - name: Ruff format check
         run: uv run ruff format --check kaos_nlp_transformers/ tests/
@@ -67,8 +72,8 @@ jobs:
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies (clustering extra so the ty hook resolves scipy)
-        run: uv sync --group dev --extra clustering --python 3.13
+      - name: Install dependencies (clustering + model2vec extras so the ty hook resolves both)
+        run: uv sync --group dev --extra clustering --extra model2vec --python 3.13
 
       - name: Run pre-commit
         run: uvx pre-commit run --all-files --show-diff-on-failure
@@ -133,8 +138,16 @@ jobs:
         # Only `tests/unit/` runs in regular CI. `tests/integration/`
         # is the live-tier (real provider APIs) and runs separately
         # with credentials gated behind a manual workflow.
+        #
+        # `-m "not live"` deselects @pytest.mark.live tests that live
+        # in tests/unit/test_tools.py (happy-path covers that exercise
+        # the real fastembed download). They cannot run hermetically
+        # in CI and segfault under free-threaded Python (3.14t) because
+        # fastembed's transitive py_rust_stemmers is not Py_GIL_DISABLED-
+        # safe. The integration tier picks them up.
         run: |
           uv run pytest tests/unit/ \
+            -m "not live" \
             --cov=kaos_nlp_transformers \
             --cov-branch \
             --cov-report=term-missing \
@@ -178,8 +191,11 @@ jobs:
         run: uv sync --group dev --resolution=lowest-direct --python 3.13
 
       - name: Run unit tests
+        # `-m "not live"` deselects @pytest.mark.live tests that exercise
+        # the real fastembed download — see Test job for the same gate.
         run: |
           uv run pytest tests/unit/ \
+            -m "not live" \
             --no-cov \
             -q
 

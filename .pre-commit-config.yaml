@@ -16,9 +16,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^LICENSE
+        exclude: ^(LICENSE|kaos_nlp_transformers/_vendor/)
       - id: end-of-file-fixer
-        exclude: ^LICENSE
+        exclude: ^(LICENSE|kaos_nlp_transformers/_vendor/)
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict

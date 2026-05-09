@@ -44,15 +44,20 @@ class KaosNLPTransformersSettings(ModuleSettings):
     """Device for embedding inference.
 
     Values: 'auto' (detect best available), 'cpu', 'cuda', 'cuda:0',
-    'cuda:1', 'mps', 'xla', 'openvino'. Default 'auto' selects the
-    best GPU if torch is installed with GPU support, otherwise CPU.
+    'cuda:1', 'openvino'. Default 'auto' selects the best ONNX-Runtime
+    -reachable GPU if one is present (requires the ``[gpu]`` extra to
+    install ``onnxruntime-gpu``), otherwise CPU. Audit-06 KNT-501:
+    ``mps`` and ``xla`` were removed as valid values when the torch
+    backend was retired in 0.1.0a6.
     """
 
     backend: str = "auto"
     """Embedding backend preference.
 
-    Values: 'auto' (device-dependent), 'fastembed', 'sentence-transformers'.
-    Default 'auto' uses fastembed for CPU, sentence-transformers for GPU.
+    Values: 'auto' (registry-driven), 'fastembed' (ONNX), 'model2vec'
+    (static numpy lookup). Default 'auto' lets the registry's
+    ``backend`` field decide. Audit-06 KNT-501: ``sentence-transformers``
+    was removed as a valid value when torch was dropped in 0.1.0a6.
     """
 
     workspace_root: Path | None = None

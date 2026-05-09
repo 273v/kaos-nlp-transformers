@@ -282,9 +282,14 @@ def kaos_caplog(caplog):
 
 
 def test_detect_devices_warns_when_only_latent(monkeypatch, kaos_caplog):
-    """Promotion of silent CPU fallback to WARNING — the regression this fix prevents."""
-    cand = [LatentDevice(name="NV GPU", kind="cuda", reason="r", install_extra="torch")]
-    monkeypatch.setattr("kaos_nlp_transformers.device._detect_torch_devices", lambda: [])
+    """Promotion of silent CPU fallback to WARNING — the regression this fix prevents.
+
+    Audit-06 KNT-501: post-torch-removal, the reachable-GPU detector is
+    ``_detect_reachable_gpus(onnx_providers)`` (built on nvidia-smi +
+    CUDAExecutionProvider). The latent install hint is now ``[gpu]``.
+    """
+    cand = [LatentDevice(name="NV GPU", kind="cuda", reason="r", install_extra="gpu")]
+    monkeypatch.setattr("kaos_nlp_transformers.device._detect_reachable_gpus", lambda _p: [])
     monkeypatch.setattr("kaos_nlp_transformers.device._detect_onnx_providers", lambda: [])
     _stub_probes(monkeypatch, nvidia=cand)
     _reset_cache_for_tests()
@@ -294,20 +299,19 @@ def test_detect_devices_warns_when_only_latent(monkeypatch, kaos_caplog):
     assert sys.has_gpu is False
     assert sys.has_latent_gpu is True
     msgs = [r.getMessage() for r in kaos_caplog.records if r.levelno == logging.WARNING]
-    assert any("latent accelerator" in m and "kaos-nlp-transformers[torch]" in m for m in msgs)
+    assert any("latent accelerator" in m and "kaos-nlp-transformers[gpu]" in m for m in msgs)
 
 
 def test_detect_devices_no_warning_when_gpu_reachable(monkeypatch, kaos_caplog):
     """Regression guard: existing GPU-reachable path stays at INFO, not WARNING."""
     monkeypatch.setattr(
-        "kaos_nlp_transformers.device._detect_torch_devices",
-        lambda: [
-            DeviceInfo(
-                name="GPU", device="cuda:0", backend="sentence-transformers", memory_mb=16000
-            )
-        ],
+        "kaos_nlp_transformers.device._detect_reachable_gpus",
+        lambda _p: [DeviceInfo(name="GPU", device="cuda:0", backend="fastembed", memory_mb=16000)],
     )
-    monkeypatch.setattr("kaos_nlp_transformers.device._detect_onnx_providers", lambda: [])
+    monkeypatch.setattr(
+        "kaos_nlp_transformers.device._detect_onnx_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
     _stub_probes(monkeypatch)
     _reset_cache_for_tests()
 
@@ -318,7 +322,7 @@ def test_detect_devices_no_warning_when_gpu_reachable(monkeypatch, kaos_caplog):
 
 
 def test_detect_devices_no_warning_when_clean_cpu_box(monkeypatch, kaos_caplog):
-    monkeypatch.setattr("kaos_nlp_transformers.device._detect_torch_devices", lambda: [])
+    monkeypatch.setattr("kaos_nlp_transformers.device._detect_reachable_gpus", lambda _p: [])
     monkeypatch.setattr("kaos_nlp_transformers.device._detect_onnx_providers", lambda: [])
     _stub_probes(monkeypatch)  # nothing latent either
     _reset_cache_for_tests()

@@ -3,21 +3,26 @@
 Two layers of probing run on first call:
 
 1. **Reachable** devices — accelerators that the *current Python install* can
-   actually drive: torch's CUDA / ROCm / MPS / XLA, plus ONNX Runtime
-   execution providers. These end up in ``SystemDevices.devices`` and are
+   actually drive. Audit-06 KNT-501: post-torch-removal, this is exactly
+   "what does ONNX Runtime see?" — ``CUDAExecutionProvider`` + the matching
+   nvidia-smi enumeration is the CUDA path; ``OpenVINOExecutionProvider``
+   is the OpenVINO path; ``CoreMLExecutionProvider`` (when added) covers
+   Apple Silicon. These end up in ``SystemDevices.devices`` and are
    returned by ``resolve_device``.
 
 2. **Latent** devices — accelerators that are physically present on the host
    but **not** reachable from this Python install (e.g. an NVIDIA GPU on a
-   box where neither ``torch`` nor ``onnxruntime-gpu`` was installed). These
-   end up in ``SystemDevices.latent_devices`` with a typed ``install_extra``
-   hint so callers (CLI, MCP info tool, agents) can recommend the exact
-   ``pip install kaos-nlp-transformers[<extra>]`` to recover.
+   box where ``onnxruntime-gpu`` was not installed). These end up in
+   ``SystemDevices.latent_devices`` with a typed ``install_extra`` hint so
+   callers (CLI, MCP info tool, agents) can recommend the exact
+   ``pip install kaos-nlp-transformers[<extra>]`` to recover. Post-0.1.0a6
+   the only install hint we emit is ``"gpu"`` (onnxruntime-gpu) — the
+   ``"torch"`` extra is gone.
 
 The OS-level probes are deliberately import-free: NVIDIA goes through
 ``/dev/nvidia*`` plus a one-shot ``nvidia-smi`` exec; AMD ROCm through
-``/dev/kfd``; Apple MPS through ``platform.machine()``. They never import
-torch or onnxruntime, so they work on a fresh ``pip install
+``/dev/kfd``; Apple via ``platform.machine()``. They never import
+onnxruntime, so they work on a fresh ``pip install
 kaos-nlp-transformers`` (fastembed-only) base box.
 
 Detection is cached at the module level — first call probes, subsequent
@@ -26,7 +31,6 @@ calls return the cached result.
 
 from __future__ import annotations
 
-import importlib
 import platform
 import shutil
 import subprocess
@@ -52,10 +56,13 @@ class DeviceInfo:
     """Human-readable device name (e.g. 'NVIDIA GeForce RTX 5070 Ti')."""
 
     device: str
-    """PyTorch-style device string: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps', 'xla'."""
+    """Device string: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'openvino'.
+    Audit-06 KNT-501: 'mps' and 'xla' were retired alongside the torch backend."""
 
     backend: str
-    """Recommended embedding backend: 'fastembed' or 'sentence-transformers'."""
+    """Recommended embedding backend — always 'fastembed' post-audit-06.
+    Field kept for forward compatibility (e.g. 'model2vec' for static-only
+    devices, if we ever surface those as DeviceInfo entries)."""
 
     memory_mb: int = 0
     """Device memory in MB (0 for CPU or unknown)."""
@@ -132,71 +139,58 @@ class SystemDevices:
 
 
 # ---------------------------------------------------------------------------
-# Reachable-device probes (torch + onnxruntime — Python-level)
+# Reachable-device probes (onnxruntime — Python-level)
 # ---------------------------------------------------------------------------
 
 
-def _detect_torch_devices() -> list[DeviceInfo]:
-    """Probe PyTorch for CUDA, ROCm, MPS, and XLA devices."""
-    devices: list[DeviceInfo] = []
-
-    try:
-        torch = importlib.import_module("torch")
-    except ImportError:
-        return devices
-
-    # CUDA / ROCm (ROCm presents as CUDA in PyTorch)
-    if torch.cuda.is_available():
-        for i in range(torch.cuda.device_count()):
-            props = torch.cuda.get_device_properties(i)
-            # torch >=2.11 renamed total_mem → total_memory
-            mem_bytes = getattr(props, "total_memory", None) or getattr(props, "total_mem", 0)
-            mem_mb = mem_bytes // (1024 * 1024)
-            devices.append(
-                DeviceInfo(
-                    name=props.name,
-                    device=f"cuda:{i}",
-                    backend="sentence-transformers",
-                    memory_mb=mem_mb,
-                )
-            )
-
-    # Apple Silicon MPS
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        devices.append(
-            DeviceInfo(
-                name="Apple MPS",
-                device="mps",
-                backend="sentence-transformers",
-            )
-        )
-
-    # XLA / TPU
-    try:
-        xm = importlib.import_module("torch_xla.core.xla_model")
-
-        xla_device = xm.xla_device()  # type: ignore[no-untyped-call]
-        devices.append(
-            DeviceInfo(
-                name=f"XLA ({getattr(xla_device, 'type', 'unknown')})",
-                device="xla",
-                backend="sentence-transformers",
-            )
-        )
-    except (ImportError, RuntimeError):
-        pass
-
-    return devices
-
-
 def _detect_onnx_providers() -> list[str]:
-    """Return available ONNX Runtime execution providers."""
+    """Return available ONNX Runtime execution providers.
+
+    Audit-06 KNT-501: post-torch-removal, onnxruntime is the only Python-
+    level reachable-device probe. CUDA / OpenVINO / CoreML / ROCm all
+    surface here as execution-provider names. The matching OS-level
+    probes (nvidia-smi, /dev/kfd, platform.machine) backfill the
+    "physically present but Python-unreachable" latent-device list.
+    """
     try:
-        ort: Any = importlib.import_module("onnxruntime")
+        import onnxruntime as ort
 
         return list(ort.get_available_providers())
     except ImportError:
         return []
+
+
+def _detect_reachable_gpus(onnx_providers: list[str]) -> list[DeviceInfo]:
+    """Build the reachable-GPU list from the ONNX providers + nvidia-smi.
+
+    Audit-06 KNT-501: replaces the old ``_detect_torch_devices``. The
+    pattern: if ``CUDAExecutionProvider`` is in ``onnx_providers``,
+    every NVIDIA GPU surfaced by ``nvidia-smi`` is a reachable
+    ``cuda:N`` device. fastembed (or any onnxruntime-gpu consumer)
+    can target it directly. If onnxruntime-gpu is NOT installed, the
+    GPUs go to the latent list with ``install_extra="gpu"``.
+    """
+    devices: list[DeviceInfo] = []
+    if "CUDAExecutionProvider" not in onnx_providers:
+        return devices
+    for row in _run_nvidia_smi():
+        try:
+            mem_mb = int(row.get("memory_mb", "0"))
+        except ValueError:
+            mem_mb = 0
+        try:
+            idx = int(row["index"])
+        except (KeyError, ValueError):
+            idx = len(devices)
+        devices.append(
+            DeviceInfo(
+                name=row.get("name", "NVIDIA GPU"),
+                device=f"cuda:{idx}",
+                backend="fastembed",
+                memory_mb=mem_mb,
+            )
+        )
+    return devices
 
 
 # ---------------------------------------------------------------------------
@@ -291,11 +285,12 @@ def _probe_nvidia() -> list[LatentDevice]:
                 name=row["name"],
                 kind="cuda",
                 reason=(
-                    "Neither torch (with CUDA) nor onnxruntime-gpu is installed; "
-                    "the GPU is visible to the driver but not to this Python "
-                    "process."
+                    "onnxruntime-gpu is not installed; the GPU is visible to "
+                    "the driver but not to this Python process. Audit-06 "
+                    "KNT-501: torch is no longer required — the GPU on-ramp "
+                    "is the [gpu] extra (onnxruntime-gpu)."
                 ),
-                install_extra="torch",
+                install_extra="gpu",
                 detail={
                     "index": int(row["index"]) if row["index"].isdigit() else row["index"],
                     "uuid": row["uuid"],
@@ -322,10 +317,11 @@ def _probe_rocm() -> list[LatentDevice]:
             name="AMD ROCm GPU",
             kind="rocm",
             reason=(
-                "/dev/kfd is present (ROCm driver loaded) but torch with the "
-                "ROCm build is not installed in this environment."
+                "/dev/kfd is present (ROCm driver loaded) but onnxruntime "
+                "with ROCm support is not in this environment. Audit-06 "
+                "KNT-501: ROCm now requires onnxruntime-rocm, not torch."
             ),
-            install_extra="torch",
+            install_extra="gpu",
             detail={},
         )
     ]
@@ -340,10 +336,11 @@ def _probe_apple() -> list[LatentDevice]:
             name="Apple Silicon (MPS)",
             kind="mps",
             reason=(
-                "Running on Apple Silicon but torch (with MPS) is not "
-                "installed in this environment."
+                "Running on Apple Silicon. Audit-06 KNT-501: torch + MPS is "
+                "no longer the GPU on-ramp; install onnxruntime with the "
+                "CoreMLExecutionProvider for Apple-Silicon acceleration."
             ),
-            install_extra="torch",
+            install_extra=None,
             detail={"machine": platform.machine(), "system": platform.system()},
         )
     ]
@@ -414,8 +411,8 @@ def detect_devices() -> SystemDevices:
     reachable GPU does — the silent-CPU-fallback failure mode this guard
     was built to fix.
     """
-    gpu_devices = _detect_torch_devices()
     onnx_providers = _detect_onnx_providers()
+    gpu_devices = _detect_reachable_gpus(onnx_providers)
     latent = _detect_latent_devices(gpu_devices, onnx_providers)
 
     # Sort GPU devices by memory descending (prefer bigger GPUs)
@@ -533,7 +530,8 @@ def resolve_device(requested: str, system: SystemDevices | None = None) -> Devic
         f"Device {requested!r} not available. "
         f"Available: {', '.join(d.device for d in system.devices)}. "
         "Fix: use 'auto' for automatic detection, or install the required "
-        "backend (e.g. `pip install kaos-nlp-transformers[torch]` for CUDA)."
+        "backend (e.g. `pip install kaos-nlp-transformers[gpu]` for CUDA "
+        "via onnxruntime-gpu — audit-06 KNT-501 retired the [torch] extra)."
     )
     raise ValueError(msg)
 

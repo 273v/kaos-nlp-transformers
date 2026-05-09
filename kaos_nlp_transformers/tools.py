@@ -22,9 +22,11 @@ Tool surface (v0):
         and return the top-k cosine-similar hits for a query. Read-only.
 
     kaos-nlp-transformers-rerank
-        Score (query, candidate) pairs with a cross-encoder reranker and
-        return them sorted by relevance. Requires ``[torch]`` extra at
-        execute time; missing-extra surfaces as a friendly install hint.
+        Score (query, candidate) pairs with a cross-encoder reranker
+        (fastembed.TextCrossEncoder, ONNX) and return them sorted by
+        relevance. No extra required for CPU; ``[gpu]`` (onnxruntime-gpu)
+        accelerates on CUDA. Audit-06 KNT-501 retired the legacy
+        ``[torch]`` requirement.
 
     kaos-nlp-transformers-dedup-semantic
         Cluster near-duplicate documents by embedding cosine distance.
@@ -578,13 +580,13 @@ def register_transformers_tools(runtime: Any) -> int:
                 display_name="Cross-Encoder Rerank",
                 description=(
                     "Score (query, candidate) pairs with a cross-encoder "
-                    "reranker (default BAAI/bge-reranker-base, MIT) and "
-                    "return them sorted by relevance. Sigmoid-normalized "
-                    "scores in [0, 1]. Pair with "
-                    "kaos-nlp-transformers-retrieve: take its top-50 hits, "
-                    "rerank to top-10. Requires the [torch] extra; missing "
-                    "extras surface as a friendly install hint. Hard-cap: "
-                    f"{_MAX_RERANK_CANDIDATES} candidates per call."
+                    "reranker (default BAAI/bge-reranker-base, MIT) via "
+                    "fastembed.TextCrossEncoder (ONNX) and return them "
+                    "sorted by relevance. Sigmoid-normalized scores in "
+                    "[0, 1]. Pair with kaos-nlp-transformers-retrieve: "
+                    "take its top-50 hits, rerank to top-10. CPU works "
+                    "out of the box; install [gpu] for CUDA acceleration. "
+                    f"Hard-cap: {_MAX_RERANK_CANDIDATES} candidates per call."
                 ),
                 category=ToolCategory.TEXT,
                 capability=ToolCapability.QUERY,
@@ -716,8 +718,10 @@ def register_transformers_tools(runtime: Any) -> int:
                 reranker = CrossEncoderReranker.load(model_id, settings=settings)
                 ranked = await reranker.rerank(query, results, top_k=top_k)
             except BackendNotInstalledError as exc:
-                # Friendly fallthrough: the [torch] extra is missing. The
-                # exception's message already carries the install hint.
+                # Friendly fallthrough: a backend dep is missing (most
+                # commonly fastembed itself, or onnxruntime-gpu when the
+                # caller asked for CUDA). The exception message already
+                # carries the install hint.
                 return ToolResult.create_error(str(exc))
             except (
                 ModelNotRegisteredError,

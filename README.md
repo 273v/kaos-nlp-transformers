@@ -20,11 +20,15 @@ cross-encoder reranker, and a semantic-dedup level that plugs into
 
 It is dependency-light at the BASE: the install pulls in
 `fastembed` (Apache-2.0) and the core KAOS runtime (`kaos-core`,
-`kaos-content`, `kaos-nlp-core`) plus `numpy`. Optional extras layer
-in the rest of the inference stack — `[torch]` for sentence-transformers
-+ PyTorch, `[gpu]` for ONNX Runtime CUDA, `[openvino]` for Intel OpenVINO,
+`kaos-content`, `kaos-nlp-core`) plus `numpy`. **No PyTorch.** Both
+embedding (`EmbeddingModel`) and cross-encoder reranking
+(`CrossEncoderReranker`) run through the same ONNX runtime, so the
+default install handles every model in the registry on CPU out of the
+box. Optional extras layer in acceleration and adjacent surfaces —
+`[gpu]` for ONNX Runtime CUDA, `[openvino]` for Intel OpenVINO,
+`[model2vec]` for the static-numpy lookup backend (~500x CPU speedup),
 `[clustering]` for SciPy-backed semantic dedup, and `[mcp]` for the
-forthcoming MCP tool surface.
+MCP tool surface.
 
 ## Install
 
@@ -38,12 +42,19 @@ pip install kaos-nlp-transformers
 install is fastembed-only (CPU + ONNX). Add the extras you need:
 
 ```bash
-uv add "kaos-nlp-transformers[torch]"        # GPU inference / non-ONNX models
 uv add "kaos-nlp-transformers[gpu]"          # NVIDIA CUDA via onnxruntime-gpu
 uv add "kaos-nlp-transformers[openvino]"     # Intel CPU / GPU acceleration
+uv add "kaos-nlp-transformers[model2vec]"    # Static-numpy backend (~500x CPU)
 uv add "kaos-nlp-transformers[clustering]"   # SemanticDedupLevel (scipy)
-uv add "kaos-nlp-transformers[mcp]"          # MCP tool surface (planned 0.1.0a2+)
+uv add "kaos-nlp-transformers[mcp]"          # MCP tool surface
 ```
+
+> **0.1.0a6 migration note.** Audit-06 KNT-501 retired the `[torch]`
+> extra — the package no longer depends on PyTorch or
+> `sentence-transformers`. `pip install kaos-nlp-transformers[torch]`
+> still resolves (as a no-op alias) for one release cycle so existing
+> CI and lockfiles keep working; new code should use `[gpu]` for CUDA
+> acceleration. The `[torch]` alias is removed in 0.3.0.
 
 Platform coverage: any platform with a CPython 3.13+ wheel and ONNX
 Runtime support — the `fastembed` wheel matrix covers Linux x86_64 +
@@ -101,35 +112,34 @@ The package is built around a small set of typed primitives.
 
 | Concept | What it is |
 |---|---|
-| **`EmbeddingModel`** | The single entry point for inference. `EmbeddingModel.load(model_id, *, device=None, backend=None, settings=None)` resolves the registry entry, picks a backend (`fastembed` by default, `sentence-transformers` for GPU / non-ONNX models), and returns an instance with an `.embed(texts, *, batch_size=32) -> np.ndarray` method. Backends are process-cached by `(model_id, revision, device, cache_dir)` so repeated `load()` calls are O(1). |
-| **`RegisteredModel` / `REGISTRY` / `EXCLUDED`** | Curated, license-vetted model catalog. Each entry pins a HuggingFace Hub commit SHA (audit-01 KNT-003: revisions thread through the loader cache key). The `EXCLUDED` map names models intentionally rejected with their licensing reason — jina-v3 (CC-BY-NC), NV-Embed (CC-BY-NC), Qwen3-Embedding (MS MARCO ambiguity). v0 ships one entry: `BAAI/bge-small-en-v1.5` (33M, MIT). |
+| **`EmbeddingModel`** | The single entry point for inference. `EmbeddingModel.load(model_id, *, device=None, backend=None, settings=None)` resolves the registry entry, picks a backend (`fastembed` for ONNX models on CPU/GPU, `model2vec` for static lookup models), and returns an instance with an `.embed(texts, *, batch_size=32) -> np.ndarray` method. Backends are process-cached by `(model_id, revision, device, cache_dir)` so repeated `load()` calls are O(1). |
+| **`RegisteredModel` / `REGISTRY` / `EXCLUDED`** | Curated, license-vetted model catalog. Each entry pins a HuggingFace Hub commit SHA (audit-01 KNT-003: revisions thread through the loader cache key). The `EXCLUDED` map names models intentionally rejected with their licensing reason — jina-v3 (CC-BY-NC), NV-Embed (CC-BY-NC), Qwen3-Embedding (MS MARCO ambiguity). v0 ships `BAAI/bge-small-en-v1.5` (33M, MIT, fastembed) plus three model2vec entries (`potion-base-8M`, `potion-base-32M`, `potion-retrieval-32M`). `potion-base-8M` is **vendored inside the wheel** (~28 MB), so it loads offline with no network. |
 | **`EmbeddingRetriever`** | Brute-force cosine similarity search over a numpy matrix. `from_texts(...)` and `from_corpus(...)` factories. For corpora up to ~50K documents this is faster than FAISS overhead. Implements the `kaos_nlp_core.search.SearchHit` protocol. |
-| **`CrossEncoderReranker`** | Optional second-pass reranker (cross-encoder / pair-scoring model, `[torch]` extra). Use to refine `EmbeddingRetriever` top-50 → top-10. |
+| **`CrossEncoderReranker`** | Optional second-pass reranker via `fastembed.TextCrossEncoder` (default `BAAI/bge-reranker-base`, MIT). No extra required for CPU; `[gpu]` accelerates on CUDA. Use to refine `EmbeddingRetriever` top-50 → top-10. Sigmoid-normalized scores in `[0, 1]`. |
 | **`SemanticDedupLevel`** | Plug-in for `kaos-content`'s deduplication framework. Embeds documents, computes pairwise cosine distance with `scipy.spatial.distance.pdist`, and clusters with `scipy.cluster.hierarchy.fcluster`. Requires the `[clustering]` extra. |
-| **`KaosNLPTransformersSettings`** | Typed settings (env prefix `KAOS_NLP_TRANSFORMERS_`): `default_model`, `cache_dir`, `offline`, `allow_unregistered`, `device`, `backend`, `profile`. Honors legacy `HF_HUB_OFFLINE` and `HF_HOME`. When `offline=True`, the load path sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` (audit-01 KNT-005). |
-| **Device detection** | `detect_devices()` returns a `SystemDevices` snapshot (CUDA visible? MPS? OpenVINO? counts and names) so callers can route work appropriately. `EmbeddingModel.load(device="auto")` picks the best available; explicit `"cpu"` / `"cuda"` / `"cuda:0"` / `"mps"` / `"openvino"` are honored. |
+| **`KaosNLPTransformersSettings`** | Typed settings (env prefix `KAOS_NLP_TRANSFORMERS_`): `default_model`, `default_reranker_model`, `cache_dir`, `offline`, `allow_unregistered`, `device`, `backend`, `profile`. Honors legacy `HF_HUB_OFFLINE` and `HF_HOME`. When `offline=True`, the load path sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` (audit-01 KNT-005). |
+| **Device detection** | `detect_devices()` returns a `SystemDevices` snapshot (reachable accelerators + ONNX execution providers + latent GPUs the OS sees but the install can't drive). `EmbeddingModel.load(device="auto")` picks the best available; explicit `"cpu"` / `"cuda"` / `"cuda:0"` / `"openvino"` are honored. Audit-06 KNT-501 retired `mps` and `xla` alongside the torch backend. |
 
 ## CLI
 
 `kaos-nlp-transformers` ships a `kaos-nlp-transformers` administrative
-CLI (`info` subcommand only in 0.1.0a1) plus a placeholder
-`kaos-nlp-transformers-serve` for the future MCP server (the `[mcp]`
-extra will wire it up):
+CLI (`info` subcommand) plus a `kaos-nlp-transformers-serve` MCP server
+launcher that requires the `[mcp]` extra:
 
 ```bash
 kaos-nlp-transformers info --json    # version + registry + device snapshot
-kaos-nlp-transformers-serve          # placeholder; MCP wiring in 0.1.0a2+
+kaos-nlp-transformers-serve          # stdio MCP server (requires [mcp])
 ```
 
 ## Compatibility & status
 
 | Aspect | |
 |---|---|
-| **Python** | 3.13, 3.14 — GIL builds only. Free-threaded builds (3.13t / 3.14t / `Py_GIL_DISABLED`) are **not supported**: `EmbeddingModel.load` / `CrossEncoderReranker.load` raise `BackendNotInstalledError` because fastembed's transitive `py_rust_stemmers` (and the `tokenizers` + `transformers` chain on the `[torch]` path) segfault during module init without the GIL. Pending upstream `Py_GIL_DISABLED` declarations from those C extensions; the guard is removed once that lands. Pure-Python `py3-none-any` wheel. |
+| **Python** | 3.13, 3.14 — GIL builds only. Free-threaded builds (3.13t / 3.14t / `Py_GIL_DISABLED`) are **not supported**: `EmbeddingModel.load` / `CrossEncoderReranker.load` raise `BackendNotInstalledError` because fastembed's transitive `py_rust_stemmers` and `tokenizers` C extensions segfault during module init without the GIL. Pending upstream `Py_GIL_DISABLED` declarations from those extensions; the guard is removed once that lands. Pure-Python `py3-none-any` wheel. |
 | **OS** | Any platform with a CPython 3.13+ wheel and ONNX Runtime support — Linux x86_64 + aarch64 (manylinux), macOS x86_64 + arm64, Windows x86_64. |
 | **Maturity** | Alpha. The public API is documented in `kaos_nlp_transformers.__all__`. |
 | **Stability policy** | Pre-1.0: minor bumps may change behaviour. Every change is documented in [`CHANGELOG.md`](CHANGELOG.md). |
-| **Test coverage** | 56 Python unit tests + 7 audit-01 + 24 audit-02 regression tests (87 total). Live integration tests exercise real fastembed model downloads and the sentence-transformers GPU path; gated on the `live` and `gpu` markers respectively. |
+| **Test coverage** | 138 unit tests + 24 integration tests (162 total, 77% line coverage). Integration suite hits real fastembed embedding + cross-encoder reranker downloads — no mocks. GPU tests gated on the `gpu` marker; reranker live tests on `live`. |
 | **Type checker** | Validated with [`ty`](https://docs.astral.sh/ty/), Astral's Python type checker. |
 
 ## Companion packages

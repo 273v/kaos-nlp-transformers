@@ -1,12 +1,21 @@
-"""CrossEncoderReranker -- deterministic reranking via cross-encoder models.
+"""CrossEncoderReranker — deterministic reranking via cross-encoder models.
 
-Uses sentence-transformers ``CrossEncoder`` for passage-level relevance
-scoring.  Zero LLM cost, deterministic, ~5ms per 100 candidates on GPU.
+Uses ``fastembed.rerank.cross_encoder.TextCrossEncoder`` for passage-
+level relevance scoring. Zero LLM cost, deterministic. Runs on CPU
+out of the box (ONNX Runtime); GPU acceleration via the ``[gpu]``
+extra (``onnxruntime-gpu``).
 
-Requires the ``[torch]`` extra (``torch + sentence-transformers``).
-Falls back gracefully with ``BackendNotInstalledError`` if not installed.
+Default model: ``BAAI/bge-reranker-base`` (MIT, 0.3B params,
+~1 GB ONNX) — already in fastembed's native cross-encoder registry.
 
-Default model: ``BAAI/bge-reranker-base`` (MIT, 0.3B params).
+Audit-06 KNT-501: this module previously used
+``sentence-transformers.CrossEncoder`` and required the ``[torch]``
+extra (~1.4 GB of torch + transformers + sentence-transformers).
+Migrated to fastembed's TextCrossEncoder which is ONNX-only and
+already in the base dep tree (fastembed is a hard dep). Same model,
+same scoring contract, ~1.4 GB lighter install. The free-threaded-
+Python guard stays — ``py_rust_stemmers`` and ``tokenizers`` (still
+in fastembed's transitive tree) crash on ``Py_GIL_DISABLED``.
 
 Example::
 
@@ -19,16 +28,16 @@ Example::
 from __future__ import annotations
 
 import asyncio
-import importlib
 from functools import lru_cache
 from typing import Any
 
+import numpy as np
 from kaos_core.logging import get_logger
 from kaos_nlp_core.retrieval.protocol import RetrievalResult
 from kaos_nlp_core.retrieval.reranker import RankedResult
 
 from kaos_nlp_transformers.device import DeviceInfo, resolve_device
-from kaos_nlp_transformers.embedding import _offline_env_scope
+from kaos_nlp_transformers.embedding import _offline_env_scope, _onnx_providers_for_device
 from kaos_nlp_transformers.errors import (
     BackendNotInstalledError,
     ModelLoadError,
@@ -51,7 +60,7 @@ DEFAULT_RERANKER_MODEL: str = KaosNLPTransformersSettings.model_fields[
 
 
 class CrossEncoderReranker:
-    """Reranker using a cross-encoder model via sentence-transformers.
+    """Reranker using a cross-encoder model via fastembed's ONNX path.
 
     Implements the ``Reranker`` protocol from kaos-nlp-core.
     Scores are sigmoid-normalized to [0.0, 1.0].
@@ -89,21 +98,27 @@ class CrossEncoderReranker:
         Audit-02 KNT-104: routes through the reranker registry for license /
         revision / offline policy parity with embeddings.
 
+        Audit-06 KNT-501: uses fastembed's TextCrossEncoder (ONNX) instead of
+        sentence-transformers. Same model, same scoring contract, ~1.4 GB
+        lighter install. The ``[torch]`` extra is no longer required.
+
         Args:
             model_id: HuggingFace model id. Defaults to
                 ``BAAI/bge-reranker-base`` (the v0 ``RERANKER_REGISTRY``
-                default).
-            device: Device override ('auto', 'cpu', 'cuda', etc.).
+                default — natively supported by fastembed).
+            device: Device override ('auto', 'cpu', 'cuda', etc.). GPU
+                acceleration requires the ``[gpu]`` extra
+                (``onnxruntime-gpu``).
             settings: Optional settings override.
 
         Raises:
             ModelNotRegisteredError: If the model is in ``RERANKER_EXCLUDED``,
                 or is not in ``RERANKER_REGISTRY`` and
                 ``settings.allow_unregistered`` is false.
-            BackendNotInstalledError: If sentence-transformers is not
-                installed, OR if running on a free-threaded Python build
-                (audit-03 KNT-201 — tokenizers / transformers chain not
-                yet Py_GIL_DISABLED safe).
+            BackendNotInstalledError: If running on a free-threaded Python
+                build (audit-03 KNT-201 — py_rust_stemmers / tokenizers
+                still in fastembed's transitive dep tree are not yet
+                Py_GIL_DISABLED safe).
             ModelLoadError: If the model fails to load.
         """
         # Audit-03 KNT-201: same guard as EmbeddingModel.load — refuse
@@ -137,13 +152,16 @@ class CrossEncoderReranker:
                     "to bypass the registry (you are responsible for license review)."
                 )
                 raise ModelNotRegisteredError(msg)
+            # Audit-06 KNT-501: backend changed from "sentence-transformers"
+            # to "fastembed" since reranking now goes through the same
+            # ONNX runtime as embedding does.
             registered = RegisteredModel(
                 model_id=target,
                 revision="main",
                 license="UNKNOWN",
                 params_m=0,
                 dim=1,
-                backend="sentence-transformers",
+                backend="fastembed",
                 notes="unregistered reranker",
             )
         else:
@@ -164,7 +182,7 @@ class CrossEncoderReranker:
                 cache_dir=cache_dir,
             )
         logger.info(
-            "Loaded reranker %s @ %s on %s (%s)",
+            "Loaded reranker %s @ %s on %s (%s) via fastembed.TextCrossEncoder",
             registered.model_id,
             registered.revision,
             device_info.device,
@@ -191,11 +209,17 @@ class CrossEncoderReranker:
             return []
 
         pairs = [(query, r.text) for r in results]
-        raw_scores = await asyncio.to_thread(self._backend.predict, pairs, show_progress_bar=False)
+
+        # ``rerank_pairs`` is a generator (Iterable[float]). Materialize
+        # inside the worker thread so the I/O / inference work doesn't
+        # block the event loop. Audit-06 KNT-501: this replaces the old
+        # ``backend.predict(pairs, show_progress_bar=False)`` call.
+        def _score() -> list[float]:
+            return list(self._backend.rerank_pairs(pairs))
+
+        raw_scores = await asyncio.to_thread(_score)
 
         # Sigmoid normalize to [0, 1]
-        import numpy as np
-
         scores = 1.0 / (1.0 + np.exp(-np.asarray(raw_scores, dtype=np.float64)))
 
         ranked = [
@@ -217,33 +241,53 @@ def _load_cross_encoder_cached(
     device: str,
     cache_dir: str | None = None,
 ):
-    """Process-wide cache of loaded cross-encoder backends.
+    """Process-wide cache of loaded fastembed TextCrossEncoder backends.
 
-    Keyed by (model_id, revision, device, cache_dir) so a registry SHA
+    Keyed by ``(model_id, revision, device, cache_dir)`` so a registry SHA
     bump invalidates the cached backend (audit-02 KNT-104).
+
+    Audit-06 KNT-501: was sentence-transformers ``CrossEncoder``, now
+    fastembed ``TextCrossEncoder``. Note that ``revision`` is part of the
+    cache key (so a registry SHA change invalidates) but is NOT passed
+    to fastembed — fastembed's reranker registry pins its own revisions
+    per-release, like the embedding-side ``_load_fastembed_cached``.
+
+    GPU support: device.startswith("cuda") routes ``CUDAExecutionProvider``
+    via the existing ``_onnx_providers_for_device`` helper. CPU is the
+    default.
     """
     try:
-        sentence_transformers = importlib.import_module("sentence_transformers")
+        from fastembed.rerank.cross_encoder import (
+            TextCrossEncoder,  # type: ignore[import-not-found]
+        )
     except ImportError as exc:
         msg = (
-            "sentence-transformers is not installed. "
-            "Fix: install the torch extras via "
-            "`pip install kaos-nlp-transformers[torch]`. "
+            "fastembed is not installed (or its rerank submodule is missing). "
+            "Fix: reinstall via `pip install kaos-nlp-transformers` — fastembed "
+            "is a hard dep at the base install. "
             "Alternative: use JudgeReranker (LLM-based) from kaos-llm-core."
         )
         raise BackendNotInstalledError(msg) from exc
 
     try:
-        CrossEncoder = sentence_transformers.CrossEncoder
-        kwargs: dict[str, Any] = {"device": device, "revision": revision}
+        # Resolve a DeviceInfo-shaped object so we can reuse the existing
+        # ``_onnx_providers_for_device`` helper that the embedding loader
+        # uses. We only need the ``device`` field.
+        device_info = DeviceInfo(name=device, device=device, backend="fastembed")
+        providers = _onnx_providers_for_device(device_info)
+
+        kwargs: dict[str, Any] = {"model_name": model_id}
         if cache_dir:
-            kwargs["cache_folder"] = cache_dir
-        return CrossEncoder(model_id, **kwargs)
+            kwargs["cache_dir"] = cache_dir
+        if providers:
+            kwargs["providers"] = list(providers)
+        return TextCrossEncoder(**kwargs)
     except Exception as exc:
         msg = (
             f"Failed to load reranker model {model_id!r} @ {revision} on "
             f"device {device!r}: {exc}. "
-            "Fix: verify the model id is a valid HuggingFace cross-encoder. "
+            "Fix: verify the model id is in fastembed's reranker registry "
+            "(`fastembed.rerank.cross_encoder.TextCrossEncoder.list_supported_models()`). "
             f"Alternative: try device='cpu' or model='{DEFAULT_RERANKER_MODEL}'."
         )
         raise ModelLoadError(msg) from exc

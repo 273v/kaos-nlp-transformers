@@ -77,25 +77,29 @@ def test_semantic_dedup_raises_install_hint_when_scipy_missing(monkeypatch):
 
 
 def test_loader_signatures_accept_revision():
-    """Both backend loaders must accept a ``revision`` argument so the
+    """All backend loaders must accept a ``revision`` argument so the
     registered model SHA is part of the cache key (different revision →
     different cached backend).
+
+    Audit-06 KNT-501: post-torch-removal, the surviving backends are
+    fastembed (ONNX) and model2vec (static numpy). The
+    ``_load_sentence_transformers_cached`` check was retired with the
+    sentence-transformers backend.
     """
     import inspect
 
     from kaos_nlp_transformers.embedding import (
         _load_fastembed_cached,
-        _load_sentence_transformers_cached,
+        _load_model2vec_cached,
     )
 
     fe_params = inspect.signature(_load_fastembed_cached).parameters
-    st_params = inspect.signature(_load_sentence_transformers_cached).parameters
+    m2v_params = inspect.signature(_load_model2vec_cached).parameters
     assert "revision" in fe_params, (
         "fastembed loader must accept revision (cache-key participant) per audit-01 KNT-003."
     )
-    assert "revision" in st_params, (
-        "sentence-transformers loader must accept revision (cache-key + "
-        "passed through to SentenceTransformer) per audit-01 KNT-003."
+    assert "revision" in m2v_params, (
+        "model2vec loader must accept revision (cache-key + snapshot pin) per audit-01 KNT-003."
     )
 
 
@@ -171,8 +175,11 @@ def test_offline_setting_sets_hf_env_vars(monkeypatch):
         msg = "stub backend (env-var capture only)"
         raise RuntimeError(msg)
 
+    # Audit-06 KNT-501: only fastembed + model2vec backends remain, so we
+    # only need to stub _load_fastembed_cached here. The previous
+    # _load_sentence_transformers_cached stub was retired with the SE
+    # backend.
     monkeypatch.setattr(embedding_mod, "_load_fastembed_cached", _capture_then_explode)
-    monkeypatch.setattr(embedding_mod, "_load_sentence_transformers_cached", _capture_then_explode)
 
     s = KaosNLPTransformersSettings(offline=True)
     with pytest.raises(RuntimeError, match="stub backend"):

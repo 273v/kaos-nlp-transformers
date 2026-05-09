@@ -35,27 +35,32 @@ class RegisteredModel:
     """Embedding dimension produced by this model."""
 
     backend: str
-    """Which backend supports this model: 'fastembed' or 'sentence-transformers'."""
+    """Which backend supports this model: 'fastembed' (ONNX) or 'model2vec'
+    (static numpy lookup). Audit-06 KNT-501: ``'sentence-transformers'``
+    was retired alongside the ``[torch]`` extra in 0.1.0a6."""
 
     notes: str = ""
     """Free-form notes (default model? legal-doc default? etc.)."""
 
 
-# Embedding registry. Three model families covered in alpha:
+# Embedding registry. Two model families covered in alpha:
 #
 # 1. fastembed — ONNX Runtime, CPU-friendly, the default for general retrieval.
-#    Quality bench: BAAI/bge-small-en-v1.5 (33M, 384-dim, MIT).
+#    Quality bench: BAAI/bge-small-en-v1.5 (33M, 384-dim, MIT). GPU
+#    acceleration via the ``[gpu]`` extra (onnxruntime-gpu +
+#    CUDAExecutionProvider).
 #
 # 2. model2vec — static lookup (vocab → vector + average), pure numpy at
-#    inference, no torch. ~500x faster on CPU than the transformer source.
-#    Quality bench (MTEB Retrieval): potion-retrieval-32M = 35.06 (~82% of
-#    all-MiniLM-L6-v2). Use for: first-pass retrieval over 100K+ docs,
-#    high-throughput dedup/clustering. Pair with a cross-encoder reranker
-#    for final-pass quality.
+#    inference, no torch, no ONNX. ~500x faster on CPU than the transformer
+#    source. Quality bench (MTEB Retrieval): potion-retrieval-32M = 35.06
+#    (~82% of all-MiniLM-L6-v2). Use for: first-pass retrieval over 100K+
+#    docs, high-throughput dedup/clustering. Pair with a cross-encoder
+#    reranker for final-pass quality.
 #
-# 3. sentence-transformers — torch-backed; opt-in via the [torch] extra.
-#    No registry entries here today; reranker registry covers the BGE
-#    cross-encoder via the same backend.
+# Audit-06 KNT-501 (0.1.0a6): the third "sentence-transformers" backend
+# was retired. fastembed.TextCrossEncoder now serves the cross-encoder
+# reranker via the same ONNX runtime as embedding does, so torch is no
+# longer required anywhere in the package.
 #
 # Revision SHAs are validated against huggingface.co on every CI run by
 # the optional ``test_registry_shas_exist_on_hub`` test (skipped offline).
@@ -168,7 +173,10 @@ RERANKER_REGISTRY: dict[str, RegisteredModel] = {
         # pair, not a vector — dim is recorded as 1 for shape symmetry with
         # RegisteredModel rather than as an embedding dimension.
         dim=1,
-        backend="sentence-transformers",
+        # Audit-06 KNT-501: was "sentence-transformers" pre-0.1.0a6;
+        # fastembed.TextCrossEncoder now serves this same model via ONNX,
+        # so the registered backend is fastembed.
+        backend="fastembed",
         notes="Default v0 reranker. CPU-friendly cross-encoder. Verified 2026-05-08.",
     ),
 }

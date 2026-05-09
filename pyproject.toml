@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "kaos-nlp-transformers"
 dynamic = ["version"]
-description = "Dense embeddings and small-model inference for the Kelvin Agentic OS — fastembed-first ONNX, optional torch / GPU / OpenVINO backends"
+description = "Dense embeddings and small-model inference for the Kelvin Agentic OS — fastembed (ONNX) + model2vec (static numpy) backends, optional GPU / OpenVINO acceleration, no torch dependency"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "Apache-2.0"
@@ -20,8 +20,9 @@ keywords = [
   "embeddings",
   "fastembed",
   "onnx",
-  "sentence-transformers",
+  "model2vec",
   "retrieval",
+  "reranker",
   "agentic",
   "mcp",
   "kaos",
@@ -52,14 +53,20 @@ dependencies = [
 # scipy gates SemanticDedupLevel (audit-01 KNT-002). The base install
 # does not require scipy; only consumers of the dedup level pull it in.
 clustering = ["scipy>=1.14.1"]
-# PyTorch + sentence-transformers — required for any model not in
-# fastembed's ONNX registry, and for GPU inference paths.
-torch = [
-  "torch>=2.5",
-  "transformers>=4.45",
-  "sentence-transformers>=5.0",
-]
-# ONNX Runtime GPU — NVIDIA CUDA acceleration for fastembed.
+# Audit-06 KNT-501: ``[torch]`` is a deprecated no-op alias as of
+# 0.1.0a6. The package previously gated GPU embedding (via
+# sentence-transformers) and cross-encoder reranking on this extra,
+# pulling ~1.4 GB of torch + transformers + sentence-transformers into
+# the install. The migration to fastembed.TextCrossEncoder + ONNX-Runtime
+# providers (CPU + ``[gpu]`` for CUDA via onnxruntime-gpu) means torch
+# is no longer required for any in-tree code path. This empty alias
+# keeps ``pip install kaos-nlp-transformers[torch]`` resolvable for one
+# release cycle so existing CI / lockfiles don't error out; the alias
+# is removed in 0.3.0. New code should use ``[gpu]`` for GPU
+# acceleration. See CHANGELOG.md for the migration guide.
+torch = []
+# ONNX Runtime GPU — NVIDIA CUDA acceleration for fastembed AND the
+# cross-encoder reranker (post-audit-06 KNT-501).
 # NOTE: onnxruntime-gpu conflicts with onnxruntime; install one or the other.
 gpu = ["onnxruntime-gpu>=1.19"]
 # Intel OpenVINO acceleration (CPU and Intel GPU).
@@ -97,7 +104,18 @@ Changelog = "https://github.com/273v/kaos-nlp-transformers/blob/main/CHANGELOG.m
 [dependency-groups]
 # Cross-package dev baseline matches kaos-graph 0.1.0a2 / kaos-tabular 0.1.0a1:
 # pytest 9, pytest-asyncio 1.3, pytest-cov 7.1, ty 0.0.34.
+#
+# kaos-mcp is in dev (not just declared as the [mcp] extra) because
+# tests/unit/test_serve.py needs to exercise the lazy ``from kaos_mcp
+# import KaosMCPServer, KaosMCPSettings`` path inside serve.main(),
+# AND the missing-kaos-mcp install-hint path via monkeypatched
+# sys.modules. Mirrors kaos-nlp-core's dev-group pattern.
+#
+# zstandard is in dev because the prep-fixture scripts (kept in this
+# repo for reproducibility — they regenerate test fixtures from NAS)
+# write zstd-compressed artifacts. Not a runtime dep of the package.
 dev = [
+  "kaos-mcp>=0.1.0a1",
   "pytest>=9.0.3",
   "pytest-asyncio>=1.3.0",
   "pytest-cov>=7.1.0",

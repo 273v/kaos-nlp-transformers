@@ -1,11 +1,13 @@
-"""Integration tests for GPU embedding — requires CUDA GPUs.
+"""Integration tests for GPU embedding — requires onnxruntime-gpu + CUDA.
 
-Skipped when torch is not installed or CUDA is not available.
+Audit-06 KNT-501: post-torch-removal, the GPU on-ramp is the ``[gpu]``
+extra (onnxruntime-gpu) and fastembed via ``CUDAExecutionProvider``. The
+old torch-based skip + sentence-transformers backend assertions were
+retired alongside the SE backend.
 """
 
 from __future__ import annotations
 
-import importlib
 import os
 
 import numpy as np
@@ -14,14 +16,36 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-def _skip_if_no_gpu():
-    try:
-        torch = importlib.import_module("torch")
+def _has_cuda_provider() -> bool:
+    """True iff onnxruntime + a working CUDAExecutionProvider are installed.
 
-        if not torch.cuda.is_available():
-            pytest.skip("CUDA not available")
+    Checking ``get_available_providers`` is more accurate than checking
+    ``import onnxruntime_gpu`` because the gpu wheel installs as
+    ``onnxruntime`` with the CUDA provider added; there is no
+    ``onnxruntime_gpu`` import name.
+    """
+    try:
+        import onnxruntime as ort
     except ImportError:
-        pytest.skip("torch not installed")
+        return False
+    return "CUDAExecutionProvider" in ort.get_available_providers()
+
+
+def _has_nvidia_gpu() -> bool:
+    """True iff nvidia-smi reports at least one GPU."""
+    from kaos_nlp_transformers.device import _run_nvidia_smi
+
+    return bool(_run_nvidia_smi())
+
+
+def _skip_if_no_gpu():
+    if not _has_nvidia_gpu():
+        pytest.skip("no NVIDIA GPU on this host")
+    if not _has_cuda_provider():
+        pytest.skip(
+            "onnxruntime-gpu / CUDAExecutionProvider not installed — "
+            "install via `pip install kaos-nlp-transformers[gpu]`"
+        )
 
 
 def _skip_if_offline():
@@ -38,7 +62,9 @@ def test_gpu_auto_selects_cuda():
     from kaos_nlp_transformers import EmbeddingModel
 
     model = EmbeddingModel.load(device="auto")
-    assert model.backend_name == "sentence-transformers"
+    # Audit-06 KNT-501: the GPU embedding backend is fastembed (ONNX) via
+    # onnxruntime-gpu, not sentence-transformers.
+    assert model.backend_name == "fastembed"
     assert model.device is not None
     assert model.device.device.startswith("cuda")
 
@@ -133,9 +159,9 @@ def test_explicit_device_selection():
     _skip_if_no_gpu()
     _skip_if_offline()
 
-    torch = importlib.import_module("torch")
+    from kaos_nlp_transformers.device import _run_nvidia_smi
 
-    if torch.cuda.device_count() < 2:
+    if len(_run_nvidia_smi()) < 2:
         pytest.skip("need 2 GPUs for this test")
 
     from kaos_nlp_transformers import EmbeddingModel
@@ -168,7 +194,11 @@ def test_force_cpu_ignores_gpu():
 
 
 def test_force_fastembed_backend():
-    """backend='fastembed' forces fastembed even on GPU device."""
+    """backend='fastembed' forces fastembed even on GPU device.
+
+    Post-audit-06 this is functionally a no-op (fastembed is the only
+    GPU-capable backend now), but the explicit setter still resolves
+    cleanly and is useful for pinning behavior in pipelines."""
     _skip_if_no_gpu()
     _skip_if_offline()
     from kaos_nlp_transformers import EmbeddingModel
@@ -182,8 +212,8 @@ def test_force_fastembed_backend():
 
 @pytest.mark.gpu
 def test_gpu_box_has_no_latent_devices():
-    """On a host where torch sees the GPU, the OS-level probe must not
-    double-count it as latent. This is the contract that makes
+    """On a host with onnxruntime-gpu, the OS-level probe must not
+    double-count NVIDIA GPUs as latent. This is the contract that makes
     `kaos-nlp-transformers info` correct on actual GPU machines, not just
     a CPU-only fallback box where it happens to look right."""
     _skip_if_no_gpu()
@@ -193,8 +223,8 @@ def test_gpu_box_has_no_latent_devices():
     system = detect_devices()
     assert system.has_gpu is True
     # The reconciliation step in _detect_latent_devices subtracts reachable
-    # GPUs of each kind from the OS-probe candidates, so a fully torch-aware
-    # box should report zero latents.
+    # GPUs of each kind from the OS-probe candidates, so a fully
+    # CUDAExecutionProvider-aware box should report zero latents.
     assert system.has_latent_gpu is False, (
         f"expected zero latent devices on a CUDA-reachable host; "
         f"got {[(d.name, d.kind) for d in system.latent_devices]}"
@@ -224,5 +254,6 @@ def test_info_tool_resolves_to_cuda_on_gpu_box():
     payload = result.structuredContent
     assert payload is not None
     assert payload["resolved_device"]["device"].startswith("cuda")
-    assert payload["resolved_device"]["backend"] == "sentence-transformers"
+    # Audit-06 KNT-501: GPU backend is fastembed (onnxruntime-gpu), not SE.
+    assert payload["resolved_device"]["backend"] == "fastembed"
     assert payload["latent_devices"] == []

@@ -1,10 +1,15 @@
 """kaos-nlp-transformers: Dense embeddings and small-model inference for KAOS.
 
-The sibling package to ``kaos-nlp-core``. Pure Python (no Rust crate).
-v0 ships one class with two methods — ``EmbeddingModel.load()`` and
-``EmbeddingModel.embed()`` — backed by fastembed (Apache-2.0, ONNX-only,
-no torch). v1+ phases broaden the model registry, add reranking, and
-expose a ``[torch]`` extra for zero-shot NLI classification.
+The sibling package to ``kaos-nlp-core``. Pure Python (no Rust crate),
+no PyTorch. Ships ``EmbeddingModel`` (load + embed),
+``CrossEncoderReranker`` (load + rerank), and ``EmbeddingRetriever``
+(cosine search). All inference goes through fastembed (Apache-2.0, ONNX
+Runtime) or model2vec (pure-numpy static lookup, ~500x CPU speedup).
+
+GPU acceleration is opt-in via the ``[gpu]`` extra (``onnxruntime-gpu``
++ CUDA). Audit-06 KNT-501 retired the ``[torch]`` extra in 0.1.0a6 — it
+remains as a no-op alias for one release cycle so existing lockfiles
+keep resolving; new code should use ``[gpu]`` for CUDA acceleration.
 
 See ``docs/internal/prd/kaos-nlp-transformers.md`` and
 ``docs/internal/plans/kaos-nlp-transformers-v0.md``.

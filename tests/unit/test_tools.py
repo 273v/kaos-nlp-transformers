@@ -281,15 +281,21 @@ def test_retrieve_tool_happy_path():
 # -- rerank ----------------------------------------------------------------
 
 
-def test_rerank_tool_friendly_error_when_torch_missing(monkeypatch):
-    """Without [torch], the tool surfaces a structured install hint, not a stack trace."""
+def test_rerank_tool_friendly_error_when_backend_missing(monkeypatch):
+    """When the reranker backend can't load, the tool surfaces a structured
+    install hint, not a stack trace.
+
+    Audit-06 KNT-501: pre-migration this guarded the ``[torch]`` install
+    hint. Post-migration the equivalent surface is fastembed itself
+    missing (or onnxruntime-gpu for a CUDA request) — same test shape,
+    new assertion target."""
     from kaos_nlp_transformers.errors import BackendNotInstalledError
 
     def _raise(*args, **kwargs):
         raise BackendNotInstalledError(
-            "sentence-transformers is not installed. "
-            "Fix: install the torch extras via `pip install "
-            "kaos-nlp-transformers[torch]`. "
+            "fastembed is not installed (or its rerank submodule is missing). "
+            "Fix: reinstall via `pip install kaos-nlp-transformers` — fastembed "
+            "is a hard dep at the base install. "
             "Alternative: use JudgeReranker (LLM-based) from kaos-llm-core."
         )
 
@@ -307,7 +313,7 @@ def test_rerank_tool_friendly_error_when_torch_missing(monkeypatch):
     )
     assert result.isError is True
     msg = result.require_text()
-    assert "kaos-nlp-transformers[torch]" in msg
+    assert "fastembed is not installed" in msg
     assert "Fix:" in msg
 
 

@@ -1,6 +1,13 @@
 # kaos-nlp-transformers Functionality Review
 
-Date: 2026-05-08
+Date: 2026-05-08 (pre-audit-06)
+
+> **Historical artifact.** This review captures the package state
+> *before* audit-06 KNT-501 (the torch + sentence-transformers removal
+> that landed in 0.1.0a6). Statements about the `sentence-transformers`
+> backend, the `[torch]` extra, and any torch-routing logic describe
+> the 0.1.0a3..0.1.0a5 implementation, not current head. See
+> `CHANGELOG.md` § 0.1.0a6 for what changed.
 
 Scope: `kaos-nlp-transformers` module, including embeddings, dense retrieval,
 semantic deduplication, reranking, settings, packaging, CLI/server stubs, and

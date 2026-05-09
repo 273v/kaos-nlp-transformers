@@ -39,7 +39,14 @@ class EmbeddingError(KaosNLPTransformersError):
 
 
 class BackendNotInstalledError(KaosNLPTransformersError):
-    """Required backend (fastembed or torch extras) is not installed."""
+    """Required backend is not installed.
+
+    Audit-06 KNT-501: post-torch-removal, this fires when fastembed
+    is missing (base install only — should be impossible) or when an
+    optional backend dep (``[model2vec]``, ``[gpu]`` for
+    ``onnxruntime-gpu``) is requested but unavailable. The message is
+    expected to carry an actionable install hint.
+    """
 
 
 class DeviceNotReachableError(KaosNLPTransformersError):
@@ -47,7 +54,9 @@ class DeviceNotReachableError(KaosNLPTransformersError):
 
     Raised by ``device.resolve_device`` when the caller asks for e.g.
     ``cuda:0`` on a host where nvidia-smi sees the card but no Python
-    binding (torch with CUDA, or onnxruntime-gpu) is installed. The
+    binding is installed. Post-audit-06 KNT-501 the relevant binding is
+    ``onnxruntime-gpu`` (the ``[gpu]`` extra); the legacy
+    ``[torch]``-with-CUDA path was retired in 0.1.0a6. The
     ``install_extra`` detail gives an MCP tool / agent the exact extra
     to recommend — ``pip install kaos-nlp-transformers[{install_extra}]``.
 

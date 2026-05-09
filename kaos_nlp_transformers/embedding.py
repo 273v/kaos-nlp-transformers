@@ -5,16 +5,21 @@ v0 surface: one class, two methods.
     EmbeddingModel.load(model_id) -> EmbeddingModel
     EmbeddingModel.embed(texts)   -> np.ndarray of shape (N, dim)
 
-Backends:
-    - **fastembed** (default for CPU): ONNX Runtime, lightweight, fast cold start.
-    - **sentence-transformers** (default for GPU): PyTorch, supports CUDA,
-      ROCm, MPS, XLA/TPU. Install via ``pip install kaos-nlp-transformers[torch]``.
+Backends (audit-06 KNT-501 — torch removed entirely in 0.1.0a6):
+    - **fastembed** (default): ONNX Runtime. CPU out of the box; GPU via
+      the ``[gpu]`` extra (``onnxruntime-gpu``). CUDA / ROCm / OpenVINO
+      execution providers are routed through ``_onnx_providers_for_device``.
+    - **model2vec**: pure-numpy static embeddings (audit-04 KNT-301).
+      No torch, no ONNX runtime cost — direct lookup-and-average. Fastest
+      CPU path; quality trade documented per-model in REGISTRY notes.
 
 Device selection:
-    - ``device="auto"`` (default): best GPU if torch+CUDA available, else CPU.
-    - ``device="cpu"``: force CPU (fastembed).
-    - ``device="cuda"`` / ``device="cuda:0"`` / ``device="cuda:1"``: specific GPU.
-    - ``device="mps"`` / ``device="xla"`` / ``device="openvino"``: other accelerators.
+    - ``device="auto"`` (default): best GPU if onnxruntime-gpu is reachable,
+      else CPU.
+    - ``device="cpu"``: force CPU.
+    - ``device="cuda"`` / ``device="cuda:0"`` / ``device="cuda:1"``: route
+      via CUDAExecutionProvider; requires ``[gpu]`` extra.
+    - ``device="openvino"``: OpenVINOExecutionProvider; requires ``[openvino]``.
 
 The registry check fires before the backend is invoked. Excluded models
 raise ``ModelNotRegisteredError`` with the reason. Unregistered models
@@ -23,7 +28,6 @@ raise the same error unless ``allow_unregistered`` is set in settings.
 
 from __future__ import annotations
 
-import importlib
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -50,8 +54,8 @@ logger = get_logger(__name__)
 class EmbeddingModel:
     """Dense embedding inference with automatic backend and device selection.
 
-    Supports fastembed (ONNX Runtime, CPU) and sentence-transformers
-    (PyTorch, GPU/CPU). Device is auto-detected by default.
+    Supports fastembed (ONNX Runtime; CPU + ``[gpu]`` extra for CUDA) and
+    model2vec (pure-numpy static lookup). Device is auto-detected by default.
     """
 
     def __init__(
@@ -86,7 +90,7 @@ class EmbeddingModel:
 
     @property
     def backend_name(self) -> str:
-        """Backend in use: 'fastembed' or 'sentence-transformers'."""
+        """Backend in use: 'fastembed' or 'model2vec'."""
         return self._backend_name
 
     @classmethod
@@ -104,10 +108,11 @@ class EmbeddingModel:
             model_id: HF Hub model id. Defaults to
                 ``settings.default_model`` (``BAAI/bge-small-en-v1.5``).
             device: Device override. One of 'auto', 'cpu', 'cuda',
-                'cuda:0', 'cuda:1', 'mps', 'xla', 'openvino'. Defaults
-                to ``settings.device`` (which defaults to 'auto').
+                'cuda:0', 'cuda:1', 'openvino'. Defaults to
+                ``settings.device`` (which defaults to 'auto'). GPU
+                routes require the ``[gpu]`` extra.
             backend: Backend override. One of 'auto', 'fastembed',
-                'sentence-transformers'. Defaults to ``settings.backend``.
+                'model2vec'. Defaults to ``settings.backend``.
             settings: Optional settings override. When None, a fresh
                 ``KaosNLPTransformersSettings`` is constructed from the
                 environment.
@@ -121,13 +126,12 @@ class EmbeddingModel:
             ModelLoadError: If the backend fails to download or load the
                 model.
         """
-        # Audit-03 KNT-201: refuse loudly on free-threaded Python builds.
-        # fastembed pulls py_rust_stemmers (Rust/PyO3) for sparse BM25, and
-        # py_rust_stemmers crashes during module init under Py_GIL_DISABLED
-        # (SIGSEGV, exit 139). The sentence-transformers path has the same
-        # exposure via the tokenizers + transformers stack. Better to fail
-        # with a clear message at the API boundary than segfault inside
-        # `import fastembed`.
+        # Audit-03 KNT-201 (originally) + audit-06 KNT-501 (post-torch
+        # removal): refuse loudly on free-threaded Python builds.
+        # fastembed pulls py_rust_stemmers (sparse BM25) and tokenizers
+        # (reranker), both Rust/PyO3, both crash with SIGSEGV during
+        # module init under Py_GIL_DISABLED. Better to fail at the API
+        # boundary with a clear message than segfault inside fastembed.
         _check_gil_enabled()
 
         s = settings if settings is not None else KaosNLPTransformersSettings()
@@ -220,26 +224,13 @@ class EmbeddingModel:
                     device=cpu_device,
                     backend_name="model2vec",
                 )
-            if effective_backend == "sentence-transformers":
-                st_backend = _load_sentence_transformers_cached(
-                    model_id=registered.model_id,
-                    revision=registered.revision,
-                    device=device_info.device,
-                    cache_dir=cache_dir,
-                )
-                logger.info(
-                    "Loaded %s @ %s via sentence-transformers on %s (%s)",
-                    registered.model_id,
-                    registered.revision,
-                    device_info.device,
-                    device_info.name,
-                )
-                return cls(
-                    registered,
-                    st_backend,
-                    device=device_info,
-                    backend_name="sentence-transformers",
-                )
+            # Audit-06 KNT-501: the sentence-transformers branch was removed in
+            # 0.1.0a6 alongside the [torch] extra. GPU embedding now goes
+            # through fastembed with onnxruntime-gpu (same code path as CPU
+            # — the providers list is the only difference). Any caller that
+            # previously requested backend="sentence-transformers" is rejected
+            # at the _resolve_backend boundary above.
+
             # fastembed pins revisions in its own model registry and does not
             # accept a runtime revision override (audit-01 KNT-003). The cache
             # key still includes registered.revision so that a registry change
@@ -278,20 +269,10 @@ class EmbeddingModel:
             return np.zeros((0, self.dim), dtype=np.float32)
 
         try:
-            if self._backend_name == "sentence-transformers":
-                # normalize_embeddings=True keeps the sentence-transformers
-                # path in lockstep with the contract; an extra explicit
-                # _l2_normalize call below is then a defensive no-op for
-                # this backend but guards future backend additions.
-                arr = self._backend.encode(
-                    texts,
-                    batch_size=batch_size,
-                    show_progress_bar=False,
-                    convert_to_numpy=True,
-                    normalize_embeddings=True,
-                )
-                arr = np.asarray(arr, dtype=np.float32)
-            elif self._backend_name == "model2vec":
+            # Audit-06 KNT-501: the sentence-transformers backend was removed
+            # in 0.1.0a6. fastembed and model2vec are the two surviving
+            # backends; both produce ``np.ndarray`` directly.
+            if self._backend_name == "model2vec":
                 # ``StaticModel.encode`` returns ``np.ndarray`` directly and
                 # respects the model's own ``normalize`` flag (defaults to
                 # True for the potion family — verified in
@@ -367,27 +348,27 @@ def _is_free_threaded_python() -> bool:
 def _check_gil_enabled() -> None:
     """Raise :class:`BackendNotInstalledError` on free-threaded Python.
 
-    The fastembed backend pulls ``py_rust_stemmers`` (Rust/PyO3) for its
-    sparse BM25 path. As of 2026-05-08 ``py_rust_stemmers`` does not
-    declare free-threaded support, and its module-init code crashes with
-    SIGSEGV when loaded on Python 3.14t. The sentence-transformers
-    backend has the same exposure via the ``tokenizers`` + ``transformers``
-    chain.
+    fastembed pulls ``py_rust_stemmers`` (Rust/PyO3) for its sparse BM25
+    path AND ``tokenizers`` (Rust/PyO3) for the cross-encoder reranker.
+    Neither declares Py_GIL_DISABLED safety as of 2026-05-08, and both
+    crash with SIGSEGV during module init on Python 3.14t.
 
-    Audit-03 KNT-201: refuse at the API boundary so the user gets a
-    clear error pointing at the upstream tracker rather than a hard
-    segfault. When py_rust_stemmers / tokenizers / transformers ship
-    Py_GIL_DISABLED support, this check is removed (no version pin
-    needed; the upstream wheels resolve at runtime).
+    Audit-03 KNT-201 (originally) + audit-06 KNT-501 (post-torch-removal):
+    refuse at the API boundary so the user gets a clear error pointing at
+    the upstream tracker rather than a hard segfault. The migration off
+    sentence-transformers in 0.1.0a6 removed the ``transformers`` exposure
+    but py_rust_stemmers + tokenizers remain in fastembed's transitive
+    dep tree, so the guard stays. When the upstream wheels declare
+    Py_GIL_DISABLED, this check can be removed (no version pin needed;
+    upstream wheels resolve at runtime).
     """
     if _is_free_threaded_python():
         msg = (
             "kaos-nlp-transformers cannot load on a free-threaded Python "
-            "build (3.13t / 3.14t / etc.). The fastembed backend's "
-            "transitive dependency py_rust_stemmers crashes (SIGSEGV) "
-            "during module init under Py_GIL_DISABLED, and the "
-            "sentence-transformers backend has the same exposure via "
-            "tokenizers + transformers. "
+            "build (3.13t / 3.14t / etc.). fastembed's transitive "
+            "dependencies py_rust_stemmers (sparse BM25) and tokenizers "
+            "(reranker) crash (SIGSEGV) during module init under "
+            "Py_GIL_DISABLED. "
             "Fix: switch to the GIL-enabled build of Python 3.13 or 3.14 "
             "(`uv python install 3.14`, NOT 3.14t). "
             "Alternative: track upstream py_rust_stemmers / tokenizers "
@@ -459,56 +440,54 @@ def _l2_normalize(arr: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-_VALID_BACKENDS: frozenset[str] = frozenset(
-    {"auto", "fastembed", "sentence-transformers", "model2vec"}
-)
+# Audit-06 KNT-501: ``"sentence-transformers"`` was removed from the valid-
+# backend set in 0.1.0a6 alongside the [torch] extra. fastembed (ONNX) and
+# model2vec (numpy) are the two surviving backends; both run on CPU by
+# default, fastembed escalates to GPU via onnxruntime-gpu (the [gpu] extra).
+_VALID_BACKENDS: frozenset[str] = frozenset({"auto", "fastembed", "model2vec"})
 
 
 def _resolve_backend(requested: str, device: DeviceInfo, registry_backend: str) -> str:
     """Determine which backend to use given user preference and device.
 
     Audit-02 KNT-107: ``requested`` is validated against the closed set of
-    backend names. Unknown values (typos like ``"tensorflow"``) used to
-    silently fall through to the auto path and pick a backend that the
-    user did not ask for; now they raise ``ValueError`` with the valid set.
+    backend names. Unknown values (typos like ``"tensorflow"`` /
+    ``"sentence-transformers"`` post-0.1.0a6) raise ``ValueError`` with the
+    valid set rather than silently falling through.
 
     Audit-04 KNT-302: ``"model2vec"`` is honored as both an explicit
     backend choice and an auto-resolution target. model2vec models are
-    *static* (vocab → vector lookup); they never run on a torch GPU even
-    if one is available, so this resolver leaves the static-vs-attention
-    decision to the registry and ignores ``device`` for them. If the
-    caller forced a non-CPU device for an auto-resolved model2vec model,
-    we still return ``"model2vec"`` — the loader will pin the device to
-    CPU because that is the only thing that makes sense for static.
+    *static* (vocab → vector lookup); the loader pins them to CPU
+    regardless of the requested device.
 
-    Returns 'fastembed', 'sentence-transformers', or 'model2vec'.
+    Audit-06 KNT-501: post-torch-removal, the auto-resolution is just
+    "registry decides." Both fastembed and model2vec run on CPU; fastembed
+    additionally accepts a GPU device via onnxruntime providers. There is
+    no "GPU → switch to a different backend" branch anymore — fastembed
+    is the GPU path.
+
+    Returns 'fastembed' or 'model2vec'.
     """
     if requested not in _VALID_BACKENDS:
         msg = (
             f"Invalid backend {requested!r}. "
             f"Fix: use one of {sorted(_VALID_BACKENDS)}. "
             "Alternative: leave the setting unset to use the auto-detected "
-            "backend (fastembed / model2vec on CPU, sentence-transformers on GPU)."
+            "backend (registry decides — fastembed for ONNX models, "
+            "model2vec for static lookup models)."
         )
         raise ValueError(msg)
 
     if requested == "fastembed":
         return "fastembed"
-    if requested == "sentence-transformers":
-        return "sentence-transformers"
     if requested == "model2vec":
         return "model2vec"
 
-    # auto: registry first, device second.
+    # auto: registry decides. fastembed handles GPU via onnxruntime
+    # providers, so there's no device-specific override here.
     if registry_backend == "model2vec":
-        # Static models — registry decision wins regardless of device.
         return "model2vec"
-    if device.device != "cpu":
-        # GPU → sentence-transformers (unless registry says fastembed-only).
-        return device.backend
-    # CPU → use whatever the registry says (fastembed for ONNX models,
-    # sentence-transformers for torch-only models).
-    return registry_backend
+    return "fastembed"
 
 
 def _onnx_providers_for_device(device: DeviceInfo) -> tuple[str, ...] | None:
@@ -575,44 +554,10 @@ def _load_fastembed_cached(
         raise ModelLoadError(msg) from exc
 
 
-@lru_cache(maxsize=8)
-def _load_sentence_transformers_cached(
-    model_id: str,
-    revision: str,
-    device: str,
-    cache_dir: str | None = None,
-):
-    """Process-wide cache of loaded sentence-transformers backends.
-
-    Keyed by (model_id, revision, device, cache_dir) so different
-    devices and pinned revisions produce separate cached models.
-    """
-    try:
-        sentence_transformers = importlib.import_module("sentence_transformers")
-    except ImportError as exc:
-        msg = (
-            "sentence-transformers is not installed. "
-            "Fix: install the torch extras via "
-            "`pip install kaos-nlp-transformers[torch]` or "
-            "`uv pip install kaos-nlp-transformers[torch]`. "
-            "Alternative: use device='cpu' to stay on fastembed."
-        )
-        raise BackendNotInstalledError(msg) from exc
-
-    try:
-        kwargs: dict[str, Any] = {"device": device, "revision": revision}
-        if cache_dir:
-            kwargs["cache_folder"] = cache_dir
-        SentenceTransformer = sentence_transformers.SentenceTransformer
-        return SentenceTransformer(model_id, **kwargs)
-    except Exception as exc:
-        msg = (
-            f"Failed to load model {model_id!r} via sentence-transformers "
-            f"on device {device!r}: {exc}. "
-            "Fix: verify the model id is a valid HuggingFace Hub model. "
-            f"Alternative: try device='cpu' or a different model."
-        )
-        raise ModelLoadError(msg) from exc
+# Audit-06 KNT-501: ``_load_sentence_transformers_cached`` removed in
+# 0.1.0a6. The sentence-transformers backend is gone; GPU embedding is
+# served by fastembed + onnxruntime-gpu via _load_fastembed_cached above
+# (the providers list is the only thing that changes between CPU and GPU).
 
 
 def _vendored_model_path(model_id: str) -> Path | None:

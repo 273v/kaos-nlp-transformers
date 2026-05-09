@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a6] — 2026-05-08
+
+Audit-06 release. One finding (KNT-501) closed: **PyTorch and
+sentence-transformers are removed from the package entirely.** The cross-
+encoder reranker now runs through `fastembed.TextCrossEncoder` (ONNX),
+the same runtime as embedding does. Install footprint drops by ~1.4 GB.
+
+### Removed
+
+- **KNT-501 (HIGH) — torch + sentence-transformers backend retired.**
+  Pre-0.1.0a6 the optional `[torch]` extra pulled in `torch`,
+  `transformers`, and `sentence-transformers` (~1.4 GB) to power the
+  cross-encoder reranker and any embedding model fastembed didn't
+  natively support. Both surfaces now go through ONNX:
+  - **Reranker:** `CrossEncoderReranker` was rewritten on top of
+    `fastembed.rerank.cross_encoder.TextCrossEncoder`. Same model
+    (`BAAI/bge-reranker-base`, MIT, pinned to the same SHA), same
+    sigmoid-normalized `[0, 1]` scoring contract, same async-thread
+    dispatch. The `_load_cross_encoder_cached` helper switched its
+    backend import accordingly.
+  - **Embedding:** the `sentence-transformers` branch in
+    `EmbeddingModel.load` and `_resolve_backend` was deleted along with
+    `_load_sentence_transformers_cached`. The valid backend set is now
+    `{"auto", "fastembed", "model2vec"}`. GPU embedding goes through
+    fastembed + onnxruntime-gpu via the existing
+    `_onnx_providers_for_device` helper.
+  - **Settings:** `KaosNLPTransformersSettings.backend` and
+    `KaosNLPTransformersSettings.device` no longer accept
+    `"sentence-transformers"`, `"mps"`, or `"xla"`. These raise
+    `ValueError("Invalid backend ...")` at the resolve step rather than
+    silently falling through. (Audit-02 KNT-107's strict-validation
+    contract carries forward.)
+  - **Device probe:** `_detect_torch_devices` was deleted. Reachable
+    GPUs come from `_detect_reachable_gpus(onnx_providers)`, which
+    cross-references `nvidia-smi` against
+    `CUDAExecutionProvider`. `LatentDevice.install_extra` for unreachable
+    NVIDIA / ROCm GPUs is now `"gpu"` (not `"torch"`).
+
+  Test pins (audit-06): the live reranker integration suite
+  (`tests/integration/test_reranker_live.py`, 8 tests) hits the real
+  `fastembed.TextCrossEncoder` end-to-end — no mocks. Existing audit-01
+  / audit-02 tests were updated to the new loader / valid-backend set.
+
+### Changed
+
+- **`[torch]` extra is now a no-op alias.** `pip install
+  kaos-nlp-transformers[torch]` still resolves so existing CI and
+  lockfiles don't error out, but it pulls in **zero** extra packages.
+  New code should use `[gpu]` for CUDA acceleration. The alias is
+  removed entirely in 0.3.0.
+- **`RegisteredModel.backend` valid values** narrowed to
+  `{"fastembed", "model2vec"}`. The reranker registry's only entry
+  (`BAAI/bge-reranker-base`) flipped from `"sentence-transformers"` to
+  `"fastembed"` to match the new loader.
+- **`DeviceInfo.device`** no longer accepts `"mps"` / `"xla"`. The
+  detector and resolver were trimmed accordingly.
+- **`resolve_device` install hint** now says `[gpu]`, not `[torch]`,
+  for unreachable CUDA devices.
+- **Module docstrings + tool descriptions** updated across
+  `__init__.py`, `errors.py`, `models.py`, `device.py`, `tools.py`,
+  `embedding.py`, `reranker.py`, `settings.py` to reflect the
+  fastembed-only inference path. Historical references to the retired
+  surface are tagged `audit-06 KNT-501` for traceability.
+
+### Why
+
+PyTorch is the dominant Python install-size cost for the package and
+the only reason `[torch]` existed was to power the cross-encoder
+reranker (and a hypothetical "GPU = sentence-transformers" routing
+that no real workload depended on). fastembed natively supports
+`BAAI/bge-reranker-base` via `TextCrossEncoder` — same model, same
+ONNX runtime as embedding. Routing both through the same backend
+collapses the install matrix, shrinks the dependency tree by ~1.4 GB,
+and removes the GIL-incompatible `transformers` chain from the
+free-threaded-Python guard's reasoning.
+
+The custom-model story is unchanged in shape: anyone shipping their
+own sentence-transformers-trained model can convert it to ONNX +
+register it via `RegisteredModel(backend="fastembed",
+allow_unregistered=True)`. See `docs/CUSTOM_MODELS.md` (planned for
+0.1.0b1) for the conversion recipe.
+
+[0.1.0a6]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a5...v0.1.0a6
+
 ## [0.1.0a5] — 2026-05-08
 
 ### Added
@@ -292,6 +376,7 @@ fixed with regression tests in `tests/unit/test_audit_01.py`).
 This release is the first to ship under the Apache License 2.0. Earlier
 internal versions were proprietary.
 
-[Unreleased]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a3...HEAD
+[Unreleased]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a6...HEAD
+[0.1.0a5]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a3...v0.1.0a5
 [0.1.0a2]: https://github.com/273v/kaos-nlp-transformers/compare/v0.1.0a1...v0.1.0a2
 [0.1.0a1]: https://github.com/273v/kaos-nlp-transformers/releases/tag/v0.1.0a1

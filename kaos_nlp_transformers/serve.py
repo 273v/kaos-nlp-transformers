@@ -45,10 +45,7 @@ def main(argv: list[str] | None = None) -> None:
     # hint rather than a chained ImportError out of settings.py.
     try:
         from kaos_core import KaosRuntime
-
-        # kaos-mcp is the optional sibling; ty cannot see it statically in
-        # the per-package repo where it isn't installed, hence the ignore.
-        from kaos_mcp import KaosMCPServer, KaosMCPSettings  # ty: ignore[unresolved-import]
+        from kaos_mcp import KaosMCPServer, KaosMCPSettings
     except ImportError as exc:
         print(
             f"kaos-nlp-transformers-serve requires kaos-core and kaos-mcp: {exc}\n"

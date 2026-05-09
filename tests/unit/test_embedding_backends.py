@@ -31,9 +31,12 @@ def test_settings_device_from_env(monkeypatch):
 
 
 def test_settings_backend_from_env(monkeypatch):
-    monkeypatch.setenv("KAOS_NLP_TRANSFORMERS_BACKEND", "sentence-transformers")
+    # Audit-06 KNT-501: ``sentence-transformers`` is no longer a valid
+    # backend value (validated in ``_resolve_backend``); use ``model2vec``
+    # for an env-roundtrip that actually parses through to a working call.
+    monkeypatch.setenv("KAOS_NLP_TRANSFORMERS_BACKEND", "model2vec")
     s = KaosNLPTransformersSettings()
-    assert s.backend == "sentence-transformers"
+    assert s.backend == "model2vec"
 
 
 # -- _resolve_backend ------------------------------------------------------
@@ -44,25 +47,32 @@ def _cpu() -> DeviceInfo:
 
 
 def _gpu() -> DeviceInfo:
-    return DeviceInfo(name="GPU", device="cuda:0", backend="sentence-transformers")
+    # Post-audit-06: GPU device recommends fastembed too (onnxruntime-gpu
+    # via CUDAExecutionProvider). The old "GPU → sentence-transformers"
+    # branch was retired with the torch backend.
+    return DeviceInfo(name="GPU", device="cuda:0", backend="fastembed")
 
 
 def test_resolve_backend_explicit_fastembed():
     assert _resolve_backend("fastembed", _gpu(), "fastembed") == "fastembed"
 
 
-def test_resolve_backend_explicit_st():
-    assert _resolve_backend("sentence-transformers", _cpu(), "fastembed") == "sentence-transformers"
-
-
 def test_resolve_backend_auto_cpu_uses_registry():
+    """auto → registry decides. Post-audit-06 the registry choices are
+    fastembed and model2vec; sentence-transformers was retired."""
     assert _resolve_backend("auto", _cpu(), "fastembed") == "fastembed"
-    assert _resolve_backend("auto", _cpu(), "sentence-transformers") == "sentence-transformers"
+    assert _resolve_backend("auto", _cpu(), "model2vec") == "model2vec"
 
 
-def test_resolve_backend_auto_gpu_uses_device_backend():
-    # GPU device recommends sentence-transformers
-    assert _resolve_backend("auto", _gpu(), "fastembed") == "sentence-transformers"
+def test_resolve_backend_auto_gpu_stays_on_registry():
+    """Audit-06 KNT-501: removed the GPU→sentence-transformers override.
+    fastembed handles GPU via onnxruntime-gpu providers, so a GPU device
+    no longer flips the registry's choice — it just stays on fastembed
+    (the registry default for GPU-capable models)."""
+    assert _resolve_backend("auto", _gpu(), "fastembed") == "fastembed"
+    # And model2vec stays on model2vec even on a GPU device — static
+    # models have no GPU codepath; we honor the registry.
+    assert _resolve_backend("auto", _gpu(), "model2vec") == "model2vec"
 
 
 # -- model2vec backend (audit-04 KNT-302) ----------------------------------
@@ -79,8 +89,9 @@ def test_resolve_backend_explicit_model2vec():
 def test_resolve_backend_auto_routes_static_model_to_model2vec():
     """A registry entry with backend='model2vec' MUST stay on model2vec
     even when the device probe sees a GPU. Static models have no GPU
-    codepath; routing them to sentence-transformers would force the user
-    to install [torch] for a model that doesn't need it."""
+    codepath; flipping them to fastembed would force the user to download
+    an ONNX file that isn't published for the model id (and would skip
+    the cheap numpy lookup the registry asked for)."""
     assert _resolve_backend("auto", _cpu(), "model2vec") == "model2vec"
     assert _resolve_backend("auto", _gpu(), "model2vec") == "model2vec"
 

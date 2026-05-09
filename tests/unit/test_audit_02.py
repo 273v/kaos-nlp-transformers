@@ -280,8 +280,8 @@ def test_consecutive_offline_loads_dont_leak(monkeypatch):
         msg = "stub"
         raise RuntimeError(msg)
 
+    # Audit-06 KNT-501: SE loader retired; only fastembed needs stubbing.
     monkeypatch.setattr(embedding_mod, "_load_fastembed_cached", _capture_then_explode)
-    monkeypatch.setattr(embedding_mod, "_load_sentence_transformers_cached", _capture_then_explode)
 
     s_on = KaosNLPTransformersSettings(offline=True)
     s_off = KaosNLPTransformersSettings(offline=False)
@@ -524,10 +524,12 @@ def test_resolve_backend_rejects_unknown_backend():
 
     cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed", memory_mb=0)
 
-    # Valid values still work.
+    # Valid values still work. Audit-06 KNT-501: ``sentence-transformers`` was
+    # retired alongside the torch backend; the surviving valid set is
+    # {"auto", "fastembed", "model2vec"}.
     assert _resolve_backend("fastembed", cpu, "fastembed") == "fastembed"
     assert _resolve_backend("auto", cpu, "fastembed") == "fastembed"
-    assert _resolve_backend("sentence-transformers", cpu, "fastembed") == "sentence-transformers"
+    assert _resolve_backend("model2vec", cpu, "fastembed") == "model2vec"
 
     # Unknown values raise.
     with pytest.raises(ValueError, match=r"Invalid backend"):
@@ -536,6 +538,9 @@ def test_resolve_backend_rejects_unknown_backend():
         _resolve_backend("", cpu, "fastembed")
     with pytest.raises(ValueError, match=r"Invalid backend"):
         _resolve_backend("FastEmbed", cpu, "fastembed")  # case-sensitive
+    # Audit-06 KNT-501 regression guard: SE name is now invalid.
+    with pytest.raises(ValueError, match=r"Invalid backend"):
+        _resolve_backend("sentence-transformers", cpu, "fastembed")
 
 
 # -----------------------------------------------------------------------------

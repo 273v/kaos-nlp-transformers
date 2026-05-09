@@ -14,15 +14,31 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # ────────────── lint ──────────────
-  # Separate from tests so format / lint / type failures fail-fast and
-  # are easy to spot without combing through test output.
+  # ────────────── lint (Python + Rust) ──────────────
+  # Audit KNT-601 (0.2.0): hybrid Rust+Python build via maturin. Lint
+  # both surfaces here so a Rust-only mistake (rustfmt drift, clippy
+  # warning) fails fast without paying for a wheel build.
   lint:
     name: Lint
     runs-on: kaos-x64-16core
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cargo fmt
+        run: cargo fmt --check
+
+      - name: Cargo clippy
+        # Lint the cdylib in release mode — same profile as wheels and
+        # release.yml's pre-publish QA. `--lib` so we don't try to compile
+        # the criterion bench harness (it pulls heavy dev-dependencies
+        # that aren't relevant to the lint signal).
+        run: cargo clippy --release --lib -- -D warnings
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -41,6 +57,13 @@ jobs:
         # extras here keeps the source clean (no per-extra ignore comments
         # that would also need to fire under different installs).
         run: uv sync --group dev --extra clustering --extra model2vec --python 3.13
+
+      - name: Build PyO3 extension (ty needs the cdylib to resolve _rust.*)
+        # Without this step ty reports `unresolved-import` for every
+        # `from kaos_nlp_transformers._rust import ...`. maturin develop
+        # writes the compiled extension into the active venv's
+        # site-packages so the Python tooling can find it.
+        run: uv run maturin develop --release
 
       - name: Ruff format check
         run: uv run ruff format --check kaos_nlp_transformers/ tests/
@@ -62,6 +85,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Set up Rust toolchain
+        # pre-commit hooks include `cargo fmt` and `cargo clippy` since
+        # the move to maturin; they need the toolchain on PATH.
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -75,10 +105,34 @@ jobs:
       - name: Install dependencies (clustering + model2vec extras so the ty hook resolves both)
         run: uv sync --group dev --extra clustering --extra model2vec --python 3.13
 
+      - name: Build PyO3 extension
+        run: uv run maturin develop --release
+
       - name: Run pre-commit
         run: uvx pre-commit run --all-files --show-diff-on-failure
 
-  # ────────────── test ──────────────
+  # ────────────── Rust unit tests (pure Rust core) ──────────────
+  # Covers rust/core/* modules without the PyO3 binding layer. Mirrors
+  # kaos-nlp-core's rust-test job. Faster than the Python matrix and
+  # gives independent signal on the Rust core when only the bindings
+  # change (and vice versa).
+  rust-test:
+    name: Rust tests
+    runs-on: kaos-x64-16core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo test (release, lib only)
+        # `--lib` excludes the criterion bench harness; release matches
+        # the wheel build profile so optimization-level surprises (e.g.
+        # debug-only assertions) surface here.
+        run: cargo test --release --lib
+
+  # ────────────── test (Python × maturin develop) ──────────────
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: kaos-x64-16core
@@ -96,9 +150,9 @@ jobs:
           - python-version: "3.14"
             experimental: false
           # Free-threaded build (PEP 703). Available since 3.14 GA.
-          # We don't yet ship `Py_GIL_DISABLED` extensions, but we want
-          # early signal that pure-Python imports + tests still work
-          # without the GIL.
+          # Audit KNT-601 / KNT-602: our cdylib declares
+          # `gil_used = false`, so this leg now exercises the actual
+          # GIL-disabled extension, not just pure-Python imports.
           - python-version: "3.14t"
             experimental: true
           # Pre-release of 3.15 (expected GA October 2026). Catches
@@ -111,18 +165,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-          # One cache per matrix leg. Without this, all 5 jobs race
+          # One cache per matrix leg. Without this, all 4 jobs race
           # on the same cache key and only the first to finish wins —
-          # the others throw away their compiled wheels (Pillow,
-          # pydantic-core, numpy on 3.14t / 3.15) and recompile from
-          # source on every run. The annotation
-          # "Failed to save: Unable to reserve cache with key …"
-          # in the prior CI logs is exactly this race.
+          # the others throw away their compiled wheels (numpy on
+          # 3.14t / 3.15) and recompile from source on every run. The
+          # annotation "Failed to save: Unable to reserve cache with
+          # key …" in the prior CI logs is exactly this race.
           cache-suffix: test-py${{ matrix.python-version }}
 
       - name: Install Python ${{ matrix.python-version }}
@@ -134,17 +190,20 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev --python ${{ matrix.python-version }}
 
+      - name: Build PyO3 extension (maturin develop --release)
+        # KNT-601: the package is now hybrid Rust+Python. The Rust
+        # cdylib must be compiled and installed into the venv before
+        # pytest can import `kaos_nlp_transformers._rust`.
+        run: uv run maturin develop --release
+
       - name: Run unit tests with coverage
         # Only `tests/unit/` runs in regular CI. `tests/integration/`
-        # is the live-tier (real provider APIs) and runs separately
-        # with credentials gated behind a manual workflow.
+        # is the live-tier (real provider APIs / GPU) and runs
+        # separately with credentials gated behind a manual workflow.
         #
-        # `-m "not live"` deselects @pytest.mark.live tests that live
-        # in tests/unit/test_tools.py (happy-path covers that exercise
-        # the real fastembed download). They cannot run hermetically
-        # in CI and segfault under free-threaded Python (3.14t) because
-        # fastembed's transitive py_rust_stemmers is not Py_GIL_DISABLED-
-        # safe. The integration tier picks them up.
+        # `-m "not live"` deselects @pytest.mark.live tests that
+        # exercise real model downloads and provider APIs — they
+        # cannot run hermetically in CI.
         run: |
           uv run pytest tests/unit/ \
             -m "not live" \
@@ -173,6 +232,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -190,9 +252,12 @@ jobs:
       - name: Install with lowest-direct resolution
         run: uv sync --group dev --resolution=lowest-direct --python 3.13
 
+      - name: Build PyO3 extension
+        run: uv run maturin develop --release
+
       - name: Run unit tests
-        # `-m "not live"` deselects @pytest.mark.live tests that exercise
-        # the real fastembed download — see Test job for the same gate.
+        # `-m "not live"` deselects @pytest.mark.live tests that
+        # exercise real model downloads.
         run: |
           uv run pytest tests/unit/ \
             -m "not live" \
@@ -204,21 +269,21 @@ jobs:
     name: Build distribution + smoke test
     runs-on: kaos-x64-16core
     # Build only depends on the fast quality gates (lint + pre-commit
-    # + min-deps), NOT the matrix. ``kaos-nlp-transformers`` is pure Python — we
-    # ship one universal ``py3-none-any.whl`` regardless of interpreter
-    # version. The matrix legs verify our pure-Python code runs under
-    # different interpreters; their wall-clock time is dominated by
-    # transitive native deps (duckdb, pydantic-core, rpds-py) being
-    # source-built when upstream wheels don't exist for that
-    # interpreter (notably 3.15 alpha, 3.14t free-threaded). Gating
-    # build on the slowest experimental compile would chain a 30-sec
-    # wheel build behind 25+ minutes of upstream Rust/C++ source
-    # builds — pure friction. The matrix legs continue running
-    # informationally; the experimental ones stay ``continue-on-error``.
-    needs: [lint, pre-commit, min-deps]
+    # + min-deps + rust-test), NOT the Python matrix. The matrix legs
+    # verify our code runs under different interpreters; their
+    # wall-clock time on experimental legs is dominated by transitive
+    # native deps being source-built (numpy on 3.14t / 3.15). Gating
+    # build on the slowest experimental compile would chain a wheel
+    # build behind 25+ minutes of upstream source builds — pure
+    # friction. The matrix legs continue running informationally; the
+    # experimental ones stay ``continue-on-error``.
+    needs: [lint, pre-commit, min-deps, rust-test]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -231,32 +296,38 @@ jobs:
         run: uv python install 3.13
 
       - name: Build wheel + sdist
+        # `uv build` invokes the maturin backend declared in
+        # pyproject.toml. On Linux x86_64 it produces a single abi3
+        # wheel valid for CPython 3.13+ alongside the sdist. The
+        # wheel matrix in release.yml builds the other 6 platforms;
+        # this CI build is just a smoke for "the builder works" on
+        # the release runner.
         run: uv build
 
       - name: Verify metadata (twine check)
         run: uvx --from twine twine check --strict dist/*
 
       - name: Smoke-test the built wheel in a clean venv
-        # Install the actually-built wheel (not the source tree) into a
-        # clean Python environment and exercise the public API. This
-        # catches packaging bugs that source-tree tests miss: missing
-        # data files, broken `__init__.py` exports, sdist-only files
-        # that reference dist-only paths, etc.
+        # Install the actually-built wheel (not the source tree) into
+        # a clean Python environment and exercise the public API.
+        # This catches packaging bugs that source-tree tests miss:
+        # missing data files, broken `__init__.py` exports, the cdylib
+        # not being included in the wheel, py.typed marker not shipped,
+        # etc.
         #
         # We DO download a real model in CI here — the package is an
-        # ML library; a smoke test that doesn't load and run a model is
-        # documentation, not verification. fastembed's BAAI/bge-small-en
+        # ML library; a smoke test that doesn't load and run a model
+        # is documentation, not verification. BAAI/bge-small-en-v1.5
         # ONNX is ~30MiB, downloads in seconds, runs on CPU.
         run: |
           uv venv --python 3.13 /tmp/smoke
-          uv pip install --python /tmp/smoke/bin/python dist/kaos_nlp_transformers-*-py3-none-any.whl
+          uv pip install --python /tmp/smoke/bin/python dist/kaos_nlp_transformers-*.whl
           /tmp/smoke/bin/python -c "
           import numpy as np
 
           import kaos_nlp_transformers
           from kaos_nlp_transformers import (
               EmbeddingModel,
-              EmbeddingRetriever,
               EXCLUDED,
               KaosNLPTransformersSettings,
               REGISTRY,
@@ -273,6 +344,11 @@ jobs:
           import importlib.resources as ir
           assert ir.files('kaos_nlp_transformers').joinpath('py.typed').is_file(), 'py.typed missing'
 
+          # Rust cdylib reachable and reporting CPU capability.
+          from kaos_nlp_transformers._rust import registry
+          caps = registry.capabilities()
+          assert caps['cpu'] is True, f'cpu cap missing: {caps}'
+
           # Registry has at least one license-vetted model and the EXCLUDED
           # list still names the known non-permissive ones.
           assert 'BAAI/bge-small-en-v1.5' in REGISTRY
@@ -287,7 +363,7 @@ jobs:
           assert hasattr(devs, 'devices') and hasattr(devs, 'best') and hasattr(devs, 'has_gpu')
           assert any(d.device == 'cpu' for d in devs.devices)
 
-          # Real ML: load + embed + cosine similarity.
+          # Real ML: load + embed + cosine similarity through the Rust ort backend.
           model = EmbeddingModel.load('BAAI/bge-small-en-v1.5')
           vecs = model.embed([
               'Force majeure clauses excuse performance.',
@@ -300,18 +376,10 @@ jobs:
           sim = float(np.dot(n0, n1))
           assert 0.5 < sim < 0.8, f'unexpected sim for legal-pair: {sim}'
 
-          # Retrieval round-trip.
-          import asyncio
-          retriever = EmbeddingRetriever.from_texts(
-              texts=[
-                  'The buyer agrees to mediation in Delaware.',
-                  'All disputes shall be resolved by arbitration in New York.',
-                  'Force majeure clauses excuse performance.',
-              ],
-              doc_ids=[0, 1, 2],
-          )
-          hits = asyncio.run(retriever.retrieve('where do contract disputes go?', top_k=2))
-          assert len(hits) == 2 and hits[0].doc_id in (0, 1), [(h.doc_id, h.score) for h in hits]
+          # KNT-601 #2: token-aware API surface for downstream chunkers.
+          assert isinstance(model.max_seq_len, int) and model.max_seq_len > 0
+          counts = model.count_tokens(['hello world', 'a longer sentence here'])
+          assert len(counts) == 2 and all(c > 0 for c in counts)
 
           print(f'kaos-nlp-transformers {kaos_nlp_transformers.__version__}: smoke OK (sim={sim:.3f})')
           "

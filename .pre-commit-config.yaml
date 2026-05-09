@@ -56,3 +56,27 @@ repos:
         types: [python]
         pass_filenames: false
         require_serial: true
+
+  # ───────────── Rust hygiene (KNT-601: hybrid Rust+Python via maturin) ─────────────
+  # cargo fmt + clippy are cheap on PRs but slow without sccache locally.
+  # Run them on push (not every commit) via `stages: [pre-push]`. CI's
+  # `lint` job runs the same checks unconditionally — local hook just
+  # shortens the feedback loop.
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-push]
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --release --lib -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-push]

@@ -4,8 +4,8 @@ on:
   push:
     tags:
       - "v*"
-  # Manual fallback so a failed publish (e.g. a transient PyPI 5xx) can
-  # be retried without re-tagging.
+  # Manual fallback so a failed publish (e.g. transient PyPI 5xx) can be
+  # retried without re-tagging.
   workflow_dispatch:
 
 permissions:
@@ -16,8 +16,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build distribution
+  # ────────────── Pre-publish QA + sdist ──────────────
+  # One job that gates everything else: verifies version sync, runs the
+  # full QA gauntlet, builds + verifies the sdist (the format-agnostic
+  # source artifact). Wheel-matrix jobs depend on this; if the source
+  # tree is broken we never compile 7 wheels for nothing.
+  #
+  # Audit KNT-601 (0.2.0): this workflow replaces the prior
+  # hatchling-based release. The package is now a hybrid Rust+Python
+  # build via maturin; per-platform abi3 wheels.
+  sdist:
+    name: Build sdist + pre-publish QA
     runs-on: kaos-x64-16core
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -27,99 +36,162 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
-          cache-suffix: release-py3.13
 
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies (clustering extra so ty resolves scipy)
-        run: uv sync --group dev --extra clustering --python 3.13
+      - name: Install dependencies (clustering + model2vec extras so ty resolves both)
+        run: uv sync --group dev --extra clustering --extra model2vec --python 3.13
 
-      - name: Verify version matches tag
+      - name: Verify Cargo.toml version matches tag
         id: version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          VERSION=$(uv run python -c "from kaos_nlp_transformers._version import __version__; print(__version__)")
+          # Cargo SemVer "0.2.0-alpha.1" maps to PEP 440 "0.2.0a1".
+          CARGO_VERSION=$(awk -F\" '/^version = "/{print $2; exit}' Cargo.toml)
+          # Normalize Cargo SemVer "X.Y.Z-alpha.N" -> PEP 440 "X.Y.ZaN" etc.
+          PEP440_VERSION=$(echo "$CARGO_VERSION" \
+            | sed -E 's/-alpha\.([0-9]+)$/a\1/' \
+            | sed -E 's/-beta\.([0-9]+)$/b\1/' \
+            | sed -E 's/-rc\.([0-9]+)$/rc\1/')
           TAG=${GITHUB_REF_NAME#v}
-          if [ "$VERSION" != "$TAG" ]; then
-            echo "::error::Tag '$TAG' does not match _version.py value '$VERSION'"
+          if [ "$PEP440_VERSION" != "$TAG" ]; then
+            echo "::error::Tag '$TAG' does not match Cargo.toml-derived PEP 440 version '$PEP440_VERSION' (Cargo SemVer '$CARGO_VERSION')"
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=$PEP440_VERSION" >> "$GITHUB_OUTPUT"
+          echo "kaos-nlp-transformers release: tag=$TAG, cargo=$CARGO_VERSION, pep440=$PEP440_VERSION"
 
-      - name: Pre-publish QA
+      - name: Pre-publish QA — Rust
         run: |
-          uv run ruff format --check kaos_nlp_transformers/ tests/
-          uv run ruff check kaos_nlp_transformers/ tests/
-          uv run ty check kaos_nlp_transformers/ tests/
-          uv run pytest tests/unit/ --no-cov
+          cargo fmt --check
+          cargo clippy --release --lib -- -D warnings
+          cargo test --release --lib
 
-      - name: Build wheel + sdist
-        run: uv build
-
-      - name: Verify metadata
-        run: uvx --from twine twine check --strict dist/*
-
-      - name: Smoke-test the built wheel in a clean venv
+      - name: Pre-publish QA — Python (build extension first)
         run: |
-          uv venv --python 3.13 /tmp/smoke
-          uv pip install --python /tmp/smoke/bin/python dist/kaos_nlp_transformers-*-py3-none-any.whl
-          /tmp/smoke/bin/python -c "
-          import asyncio
-          import numpy as np
+          uv run maturin develop --release
+          uv run ruff format --check kaos_nlp_transformers tests scripts
+          uv run ruff check kaos_nlp_transformers tests scripts
+          uv run ty check kaos_nlp_transformers tests
+          uv run pytest tests/unit -q --no-cov
 
-          import kaos_nlp_transformers
-          from kaos_nlp_transformers import (
-              EmbeddingModel,
-              EmbeddingRetriever,
-              KaosNLPTransformersSettings,
-              REGISTRY,
-          )
+      - name: Build sdist
+        run: uv run maturin sdist --out dist
 
-          assert kaos_nlp_transformers.__version__, 'version missing from wheel'
-          assert len(kaos_nlp_transformers.__all__) >= 14
-          assert 'BAAI/bge-small-en-v1.5' in REGISTRY
-          assert KaosNLPTransformersSettings().default_model == 'BAAI/bge-small-en-v1.5'
+      - name: Verify sdist metadata
+        run: uvx --from twine twine check --strict dist/*.tar.gz
 
-          # Real ML round-trip: load + embed + retrieve. The wheel is what
-          # PyPI users will install; if the model can't load and run from a
-          # clean install, the package is broken regardless of unit-test
-          # passes.
-          model = EmbeddingModel.load('BAAI/bge-small-en-v1.5')
-          vecs = model.embed([
-              'Force majeure clauses excuse performance.',
-              'Indemnity caps the liability of the seller.',
-          ])
-          assert vecs.shape == (2, 384) and vecs.dtype == np.float32
-
-          retriever = EmbeddingRetriever.from_texts(
-              texts=[
-                  'The buyer agrees to mediation in Delaware.',
-                  'All disputes shall be resolved by arbitration in New York.',
-                  'Force majeure clauses excuse performance.',
-              ],
-              doc_ids=[0, 1, 2],
-          )
-          hits = asyncio.run(retriever.retrieve('contract dispute resolution', top_k=2))
-          assert len(hits) == 2
-          print(f'kaos-nlp-transformers {kaos_nlp_transformers.__version__}: smoke OK')
-          "
-
-      - name: Upload distribution artifacts
+      - name: Upload sdist
         uses: actions/upload-artifact@v7
         with:
-          name: dist
-          path: dist/
+          name: sdist
+          path: dist/*.tar.gz
           retention-days: 30
 
+  # ────────────── Wheel matrix ──────────────
+  # 7 wheels per release, mirroring kaos-nlp-core's matrix:
+  #   - Linux x86_64 manylinux_2_28 + musllinux_1_2
+  #   - Linux aarch64 manylinux_2_28 + musllinux_1_2
+  #   - macOS arm64
+  #   - Windows x86_64
+  #   - Windows arm64
+  # macOS x86_64 deliberately skipped (Apple ended Intel sales in 2023).
+  # GPU companion wheel ships as a separate distribution in 0.2.0a2.
+  wheels:
+    name: ${{ matrix.target }} ${{ matrix.linux-tag && '(' || '' }}${{ matrix.linux-tag }}${{ matrix.linux-tag && ')' || '' }}
+    needs: sdist
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            linux-tag: manylinux_2_28
+            manylinux: "2_28"
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            linux-tag: musllinux_1_2
+            manylinux: musllinux_1_2
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            linux-tag: manylinux_2_28
+            manylinux: "2_28"
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            linux-tag: musllinux_1_2
+            manylinux: musllinux_1_2
+          - os: macos-14
+            target: aarch64-apple-darwin
+            linux-tag: ""
+            manylinux: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            linux-tag: ""
+            manylinux: ""
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            linux-tag: ""
+            manylinux: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python (host)
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Build wheel via PyO3/maturin-action
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          # Empty for macOS/Windows; "2_28" or "musllinux_1_2" for Linux.
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --strip --out dist
+          # Don't restore from cache — release builds must be reproducible
+          # from a clean state.
+          rust-toolchain: stable
+          sccache: "true"
+
+      - name: Smoke test the wheel (verify _rust extension imports)
+        if: matrix.os == 'ubuntu-latest'
+        # Only smoke on the linux-x86_64 runner; cross-arch smoke would
+        # need qemu (out of scope here). macOS / Windows wheels get
+        # exercised by downstream consumers' CI.
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/python -c "
+          import kaos_nlp_transformers as k
+          print('version:', k.__version__)
+          from kaos_nlp_transformers._rust import registry
+          caps = registry.capabilities()
+          assert caps['cpu'] is True, f'cpu cap missing: {caps}'
+          print('caps:', dict(caps))
+          "
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.target }}-${{ matrix.linux-tag || matrix.os }}
+          path: dist/*.whl
+          retention-days: 30
+
+  # ────────────── Publish to PyPI via OIDC ──────────────
   publish-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: [sdist, wheels]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: kaos-x64-16core
     environment:
@@ -128,11 +200,21 @@ jobs:
     permissions:
       id-token: write  # OIDC for Trusted Publishing
     steps:
-      - name: Download distribution artifacts
+      - name: Download sdist
         uses: actions/download-artifact@v8
         with:
-          name: dist
+          name: sdist
           path: dist/
+
+      - name: Download all wheels
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          path: dist/
+          merge-multiple: true
+
+      - name: Show artifact set
+        run: ls -la dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -140,9 +222,10 @@ jobs:
           attestations: true
           skip-existing: false
 
+  # ────────────── GitHub Release ──────────────
   github-release:
     name: Create GitHub Release
-    needs: build
+    needs: [sdist, wheels]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: kaos-x64-16core
     permissions:
@@ -151,11 +234,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Download distribution artifacts
+      - name: Download sdist
         uses: actions/download-artifact@v8
         with:
-          name: dist
+          name: sdist
           path: dist/
+
+      - name: Download all wheels
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          path: dist/
+          merge-multiple: true
 
       - name: Create GitHub Release
         env:

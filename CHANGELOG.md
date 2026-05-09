@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### In progress (Audit KNT-601 — Rust backend migration)
+
+The 0.2.0 release replaces the Python ``fastembed`` wrapper with a
+Rust cdylib that calls [ort](https://github.com/pykeio/ort) directly
+on the same ONNX models we ship today. The full plan lives at
+[docs/MIGRATION_0_2_0.md](docs/MIGRATION_0_2_0.md). Phase 1 (the
+scaffolding cut point) ships in [Unreleased] without behavior change:
+
+- New top-level ``Cargo.toml`` and ``rust/`` crate (PyO3 ``abi3-py313``,
+  ``gil_used = false``).
+- Build backend flipped from ``hatchling`` to ``maturin``.
+- Version source is now ``Cargo.toml [package].version`` — Python
+  ``__version__`` reads from installed package metadata.
+- ``deny.toml`` configured for cargo-deny supply-chain checks.
+- New build dep: ``maturin>=1.8,<2.0`` in the dev group.
+- Existing public API is unchanged at this cut point. ``fastembed`` and
+  ``onnxruntime`` are still in the dependency tree.
+
+The Rust core, PyO3 bindings, and the experimental backend flag land
+in subsequent phases. The default backend remains ``fastembed`` until
+Phase 4 (P4.1) flips it to ``ort``.
+
 ## [0.1.0a6] — 2026-05-08
 
 Audit-06 release. One finding (KNT-501) closed: **PyTorch and

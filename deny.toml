@@ -1,0 +1,62 @@
+# cargo-deny configuration for kaos-nlp-transformers.
+# Mirrors kaos-nlp-core/deny.toml. Per docs/MIGRATION_0_2_0.md §13 and
+# the audit-A2-#9 supply-chain policy.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = [
+  # Known-but-non-impactful advisories — document with justification +
+  # ticket before adding entries here. Empty at 0.2.0 lock-in. The
+  # supply-chain audit (KNT-601 §15 of MIGRATION_0_2_0.md) found:
+  #   - 0 vulnerabilities for the Strategy C (ort direct) lockfile
+  #   - 1 unmaintained warning: paste 1.0.15 (transitive via tokenizers)
+  # paste is not impactful at runtime — it's a proc-macro for code
+  # generation. Re-evaluate when tokenizers 0.23+ migrates.
+]
+
+[licenses]
+# cargo-deny v0.18 removed the legacy ``allow-osi-fsf-free`` knob; the
+# allowlist below is the single source of truth.
+#
+# Audit KNT-601: the dep tree includes the ICU4X family (icu_*, tinystr,
+# yoke, zerovec — Unicode-3.0 license) pulled via tokenizers' regex/idna
+# chain. Unicode-3.0 is permissive and OSI-approved; explicitly allowed
+# below.
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Zlib",
+  "0BSD",
+  "CDLA-Permissive-2.0",  # webpki-roots Mozilla CA bundle re-export
+]
+exceptions = []
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+deny = [
+  # bincode 1.x is unmaintained per RUSTSEC-2025-0141 (mirrors
+  # kaos-nlp-core's policy).
+  { name = "bincode", version = "<2.0.0" },
+]
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

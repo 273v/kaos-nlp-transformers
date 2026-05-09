@@ -1,0 +1,84 @@
+[package]
+name = "kaos-nlp-transformers"
+# Single source of truth for the version: maturin reads this Cargo SemVer
+# (e.g. "0.2.0-alpha.1") and emits PEP 440-normalized wheel metadata
+# (e.g. "0.2.0a1"). Avoids dual-source drift; mirrors the kaos-nlp-core
+# pattern documented in docs/MIGRATION_0_2_0.md §6.
+version = "0.2.0-alpha.1"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["273 Ventures LLC <it@273ventures.com>"]
+description = "Dense embeddings and small-model inference for the Kelvin Agentic OS — Rust-native ONNX backend, model2vec static lookup, optional GPU"
+rust-version = "1.83"
+repository = "https://github.com/273v/kaos-nlp-transformers"
+homepage = "https://kelvin.legal"
+documentation = "https://docs.kelvin.legal"
+readme = "README.md"
+keywords = ["embeddings", "kaos", "nlp", "ort", "pyo3"]
+categories = ["text-processing", "science"]
+
+[lib]
+name = "_rust"
+path = "rust/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# `gpu` enables the ort CUDA execution provider. Built into a separate
+# wheel (`kaos-nlp-transformers-gpu` companion package) per
+# docs/MIGRATION_0_2_0.md §13. Not part of the default 0.2.0a1 wheel.
+gpu = ["ort/cuda"]
+# `openvino` enables the ort OpenVINO EP. Same companion-package shape.
+openvino = ["ort/openvino"]
+
+# --- Core dependencies ---
+
+[dependencies]
+# abi3-py313: ship one wheel per OS/arch that works on every CPython 3.13+
+# minor (3.13, 3.14, 3.15, ...). Without this flag, every new Python minor
+# requires a re-release. Mirrors kaos-nlp-core/Cargo.toml.
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py313"] }
+numpy = "0.28"
+ndarray = "0.16"
+
+# ort: ONNX Runtime via Rust. KNT-601 §6.
+#  - download-binaries fetches Microsoft's manylinux2014 libonnxruntime.a
+#    at *build time* on the wheel-build host, NOT at install time on the
+#    user's host. The runtime is then statically linked into our cdylib.
+#  - tls-rustls: required because download-binaries needs an HTTP client.
+#    rustls so the wheel-build host doesn't need libssl-dev.
+#  - ndarray: zero-copy interop with our Array2<f32> embedding outputs.
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls"] }
+
+# Rust HF tokenizers crate — replaces the Python `tokenizers` wrapper.
+# `onig` matches what the Python wrapper uses for regex-based tokenizers
+# (BPE pre-tokenizer of the BAAI/bge-small-en-v1.5 we serve).
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+
+# hf-hub: snapshot_download equivalent in pure Rust. Honors the
+# KNT-003 pinned-revision contract by passing `revision` explicitly,
+# unlike fastembed-rs's pull_from_hf which hard-codes `main`.
+# rustls-tls so we don't pull openssl. ureq is the sync HTTP backend
+# we use (no tokio).
+hf-hub = { version = "0.5", default-features = false, features = ["rustls-tls", "ureq"] }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+once_cell = "1.21"
+rayon = "1.12"
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+tempfile = "3.0"
+
+[[bench]]
+name = "bench_embedding"
+harness = false
+required-features = []
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = "symbols"

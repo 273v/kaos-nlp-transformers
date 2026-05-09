@@ -32,3 +32,10 @@ htmlcov/
 *.swo
 *~
 .DS_Store
+
+# Rust / Cargo (added 0.2.0 — KNT-601 hybrid Rust+Python migration)
+target/
+.cargo/config.toml
+# Editable maturin builds drop the cdylib here:
+kaos_nlp_transformers/_rust.abi3.so
+kaos_nlp_transformers/_rust.cpython-*.so

@@ -99,12 +99,20 @@ jobs:
           retention-days: 30
 
   # ────────────── Wheel matrix ──────────────
-  # 7 wheels per release, mirroring kaos-nlp-core's matrix:
-  #   - Linux x86_64 manylinux_2_28 + musllinux_1_2
-  #   - Linux aarch64 manylinux_2_28 + musllinux_1_2
+  # 5 wheels per release:
+  #   - Linux x86_64 manylinux_2_28
+  #   - Linux aarch64 manylinux_2_28
   #   - macOS arm64
   #   - Windows x86_64
   #   - Windows arm64
+  #
+  # musllinux is deliberately skipped (unlike kaos-nlp-core's 7-wheel
+  # matrix): the ``ort`` Rust crate uses ``download-binaries`` to fetch
+  # Microsoft's official ``libonnxruntime`` builds, and Microsoft only
+  # publishes manylinux2014 variants — there is no musllinux build of
+  # libonnxruntime to download. Alpine / musl users would need a
+  # source-build wheel, which is out of scope at 0.2.0a1.
+  #
   # macOS x86_64 deliberately skipped (Apple ended Intel sales in 2023).
   # GPU companion wheel ships as a separate distribution in 0.2.0a2.
   wheels:
@@ -118,18 +126,10 @@ jobs:
             target: x86_64-unknown-linux-gnu
             linux-tag: manylinux_2_28
             manylinux: "2_28"
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            linux-tag: musllinux_1_2
-            manylinux: musllinux_1_2
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             linux-tag: manylinux_2_28
             manylinux: "2_28"
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-            linux-tag: musllinux_1_2
-            manylinux: musllinux_1_2
           - os: macos-14
             target: aarch64-apple-darwin
             linux-tag: ""
@@ -164,21 +164,45 @@ jobs:
           rust-toolchain: stable
           sccache: "true"
 
-      - name: Smoke test the wheel (verify _rust extension imports)
+      - name: Smoke test the wheel
         if: matrix.os == 'ubuntu-latest'
         # Only smoke on the linux-x86_64 runner; cross-arch smoke would
         # need qemu (out of scope here). macOS / Windows wheels get
         # exercised by downstream consumers' CI.
+        #
+        # The smoke is intentionally minimal — verify the top-level
+        # package imports cleanly and the cdylib's __version__ is
+        # reachable via _version.py's fallback path. Reaching into
+        # `_rust.<submodule>` from a one-liner is fragile because the
+        # smoke env's installed package layout has both
+        # `_rust.abi3.so` (the cdylib) and `_rust/*.pyi` (type stubs)
+        # under the same directory, and CPython's namespace-package
+        # detector can resolve the first lookup ambiguously on some
+        # runners. The full Python test suite (test job in ci.yml)
+        # exercises every `_rust.<submodule>` import end-to-end via
+        # pytest after maturin develop, which is the authoritative
+        # check. KNT-601 v0.2.0a1 release-PR diagnostic.
         run: |
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install dist/*.whl
           /tmp/smoke/bin/python -c "
           import kaos_nlp_transformers as k
-          print('version:', k.__version__)
-          from kaos_nlp_transformers._rust import registry
-          caps = registry.capabilities()
-          assert caps['cpu'] is True, f'cpu cap missing: {caps}'
-          print('caps:', dict(caps))
+          assert k.__version__, 'version missing from wheel'
+          # Sanity-check the public surface — the top-level imports
+          # in __init__.py succeeded only if the cdylib loaded too,
+          # because EmbeddingModel / CrossEncoderReranker / device
+          # detection all transitively touch the Rust extension's
+          # registered submodules.
+          from kaos_nlp_transformers import (
+              EmbeddingModel,
+              EXCLUDED,
+              KaosNLPTransformersSettings,
+              REGISTRY,
+              detect_devices,
+          )
+          devs = detect_devices()
+          assert any(d.device == 'cpu' for d in devs.devices)
+          print(f'kaos-nlp-transformers {k.__version__}: smoke OK ({len(REGISTRY)} models registered)')
           "
 
       - name: Upload wheel

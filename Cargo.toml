@@ -4,7 +4,7 @@ name = "kaos-nlp-transformers"
 # (e.g. "0.2.0-alpha.1") and emits PEP 440-normalized wheel metadata
 # (e.g. "0.2.0a1"). Avoids dual-source drift; mirrors the kaos-nlp-core
 # pattern documented in docs/MIGRATION_0_2_0.md §6.
-version = "0.2.0-alpha.1"
+version = "0.2.0-alpha.2"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["273 Ventures LLC <it@273ventures.com>"]

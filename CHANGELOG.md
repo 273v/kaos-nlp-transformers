@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0a2] — 2026-05-09 — release-pipeline fixes (no API change)
+
+Re-roll of the 0.2.0a1 alpha; nothing landed on PyPI for 0.2.0a1 because
+the wheel matrix tripped on two infrastructural issues that publish-pypi's
+``needs: [sdist, wheels]`` gate correctly caught.
+
+### Fixed
+
+- **Drop musllinux from the wheel matrix.** The ``ort`` Rust crate
+  uses ``download-binaries`` to fetch Microsoft's official
+  ``libonnxruntime``, but Microsoft only publishes manylinux2014
+  variants — there is no musllinux build to download. Both
+  ``x86_64-unknown-linux-musl`` and ``aarch64-unknown-linux-musl``
+  builds failed for this reason. Alpine / musl users will need a
+  source-build wheel; tracking that as a 0.2.x follow-up.
+- **Simplify the release-job smoke.** The previous smoke reached into
+  ``kaos_nlp_transformers._rust.registry`` directly. On the manylinux
+  CI runner this triggered a CPython namespace-package resolution
+  ambiguity (the wheel ships ``_rust/*.pyi`` stubs alongside the
+  cdylib at ``_rust.abi3.so``; on some Python builds the directory
+  shadows the .so). The new smoke imports the public surface
+  (``EmbeddingModel``, ``REGISTRY``, ``detect_devices``), which
+  exercises the cdylib transitively without forcing the
+  ambiguous-import path. The full ``_rust.<submodule>`` import chain
+  is still gated by every ci.yml test-matrix leg via
+  ``maturin develop`` + pytest.
+
 ## [0.2.0a1] — 2026-05-09 — KNT-601 Rust backend cutover
 
 Audit-07 release. The Python ``fastembed`` wrapper is **retired

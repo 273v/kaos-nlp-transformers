@@ -5,21 +5,28 @@ v0 surface: one class, two methods.
     EmbeddingModel.load(model_id) -> EmbeddingModel
     EmbeddingModel.embed(texts)   -> np.ndarray of shape (N, dim)
 
-Backends (audit-06 KNT-501 — torch removed entirely in 0.1.0a6):
-    - **fastembed** (default): ONNX Runtime. CPU out of the box; GPU via
-      the ``[gpu]`` extra (``onnxruntime-gpu``). CUDA / ROCm / OpenVINO
-      execution providers are routed through ``_onnx_providers_for_device``.
+Backends (audit KNT-601 — fastembed retired in 0.2.0):
+    - **ort** (default): the in-tree Rust cdylib (``_rust.embedding``)
+      calls libonnxruntime via the ``ort`` crate. CPU out of the box;
+      GPU via the ``[gpu]`` companion wheel (ort/cuda EP).
     - **model2vec**: pure-numpy static embeddings (audit-04 KNT-301).
       No torch, no ONNX runtime cost — direct lookup-and-average. Fastest
       CPU path; quality trade documented per-model in REGISTRY notes.
 
+Audit history:
+    - KNT-501 (0.1.0a6): retired sentence-transformers + torch.
+    - KNT-601 (0.2.0): retired fastembed Python wrapper. Same models,
+      same outputs (cosine ≥ 0.9999 vs frozen reference vectors), but
+      free-threaded Python compatible and Rust-native.
+
 Device selection:
-    - ``device="auto"`` (default): best GPU if onnxruntime-gpu is reachable,
-      else CPU.
+    - ``device="auto"`` (default): best GPU if available + GPU wheel
+      installed, else CPU.
     - ``device="cpu"``: force CPU.
-    - ``device="cuda"`` / ``device="cuda:0"`` / ``device="cuda:1"``: route
-      via CUDAExecutionProvider; requires ``[gpu]`` extra.
-    - ``device="openvino"``: OpenVINOExecutionProvider; requires ``[openvino]``.
+    - ``device="cuda"`` / ``device="cuda:0"`` / ``device="cuda:1"``:
+      requires ``kaos-nlp-transformers-gpu`` companion wheel
+      (ort/cuda EP).
+    - ``device="openvino"``: requires ``[openvino]`` companion wheel.
 
 The registry check fires before the backend is invoked. Excluded models
 raise ``ModelNotRegisteredError`` with the reason. Unregistered models
@@ -28,8 +35,11 @@ raise the same error unless ``allow_unregistered`` is set in settings.
 
 from __future__ import annotations
 
+import hashlib
 import os
-from collections.abc import Iterator
+import threading
+from collections import OrderedDict
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -90,8 +100,52 @@ class EmbeddingModel:
 
     @property
     def backend_name(self) -> str:
-        """Backend in use: 'fastembed' or 'model2vec'."""
+        """Backend in use: ``'ort'`` or ``'model2vec'``."""
         return self._backend_name
+
+    @property
+    def max_seq_len(self) -> int:
+        """Maximum sequence length (in tokens) the underlying tokenizer
+        applies as a truncation cap.
+
+        For ``model2vec`` this is the static-lookup model's vocabulary
+        cap (commonly very large; usually irrelevant since model2vec
+        averages over present tokens). For ``ort`` this is the
+        registry's ``max_seq_len`` (e.g. 512 for BAAI/bge-small-en-v1.5).
+
+        Downstream consumers (kaos-content's ``EmbeddingChunker``) read
+        this so chunks don't silently truncate at embed time. Audit
+        KNT-601 (0.2.0) public-API addition.
+        """
+        if self._backend_name == "ort":
+            return int(self._backend.max_seq_len)
+        # model2vec: there's no inherent seq cap (it's vocab → vector
+        # lookup). Report a large value so downstream chunkers don't
+        # over-split. 1<<20 is "effectively unlimited" for any
+        # practical document.
+        return 1 << 20
+
+    def count_tokens(self, texts: Iterable[str]) -> list[int]:
+        """Tokenize ``texts`` and return per-text token counts.
+
+        Does NOT run inference; only the tokenizer pass. Used by
+        downstream chunkers to decide whether a candidate chunk fits in
+        ``max_seq_len`` before sending it to ``embed()``. Audit KNT-601
+        (0.2.0) public-API addition.
+
+        For ``model2vec``, returns a coarse word-count approximation
+        since model2vec uses its own internal tokenizer that produces
+        equivalent semantics to whitespace splitting. (The Rust path
+        uses the registered model's actual HF tokenizer.)
+        """
+        text_list: list[str] = list(texts)
+        if not text_list:
+            return []
+        if self._backend_name == "ort":
+            return list(self._backend.count_tokens(text_list))
+        # model2vec: best-effort whitespace count (model2vec doesn't
+        # expose its tokenizer cleanly through StaticModel).
+        return [len(t.split()) for t in text_list]
 
     @classmethod
     def load(
@@ -126,18 +180,25 @@ class EmbeddingModel:
             ModelLoadError: If the backend fails to download or load the
                 model.
         """
-        # Audit-03 KNT-201 (originally) + audit-06 KNT-501 (post-torch
-        # removal): refuse loudly on free-threaded Python builds.
-        # fastembed pulls py_rust_stemmers (sparse BM25) and tokenizers
-        # (reranker), both Rust/PyO3, both crash with SIGSEGV during
-        # module init under Py_GIL_DISABLED. Better to fail at the API
-        # boundary with a clear message than segfault inside fastembed.
-        _check_gil_enabled()
+        # Audit KNT-601 (0.2.0): the audit-03 KNT-201 free-threaded
+        # guard was retired alongside fastembed. The Rust cdylib is
+        # ``gil_used = false`` and the Python ``tokenizers`` /
+        # ``py_rust_stemmers`` packages are no longer in the tree.
+        # Free-threaded Python (3.13t/3.14t) loads cleanly.
 
         s = settings if settings is not None else KaosNLPTransformersSettings()
         target = model_id or s.default_model
         req_device = device or s.device
         req_backend = backend or s.backend
+
+        # Audit KNT-601 (0.2.0): set the process-wide embedding cache
+        # capacity from settings on first load. Subsequent calls
+        # honor the cap that was set first; explicit shrinks via
+        # KaosNLPTransformersSettings.embedding_cache_size on a later
+        # load() will reduce capacity (and evict) if the new value is
+        # smaller. Cache is disabled (size=0) by default.
+        if s.embedding_cache_size > 0:
+            _embed_cache_set_size(s.embedding_cache_size)
 
         # --- Registry gate ---
         if target in EXCLUDED:
@@ -167,7 +228,7 @@ class EmbeddingModel:
                 license="UNKNOWN",
                 params_m=0,
                 dim=0,
-                backend="fastembed",
+                backend="ort",
                 notes="unregistered",
             )
         else:
@@ -224,54 +285,101 @@ class EmbeddingModel:
                     device=cpu_device,
                     backend_name="model2vec",
                 )
-            # Audit-06 KNT-501: the sentence-transformers branch was removed in
-            # 0.1.0a6 alongside the [torch] extra. GPU embedding now goes
-            # through fastembed with onnxruntime-gpu (same code path as CPU
-            # — the providers list is the only difference). Any caller that
-            # previously requested backend="sentence-transformers" is rejected
-            # at the _resolve_backend boundary above.
-
-            # fastembed pins revisions in its own model registry and does not
-            # accept a runtime revision override (audit-01 KNT-003). The cache
-            # key still includes registered.revision so that a registry change
-            # to a different SHA invalidates the lru_cache entry, even though
-            # fastembed itself loads the version baked into its release.
-            fe_backend = _load_fastembed_cached(
+            # Audit KNT-601 (0.2.0): post-fastembed-removal, the embedding
+            # path goes through the Rust ``_rust.embedding.PyEmbeddingBackend``
+            # which calls libonnxruntime via the ``ort`` Rust crate.
+            # Revision pinning is now KNT-003-compliant by construction
+            # (the Rust loader passes ``revision`` to hf-hub explicitly,
+            # unlike the legacy fastembed path which depended on
+            # fastembed's release-baked SHA).
+            rust_backend = _load_rust_embedding_cached(
                 model_id=registered.model_id,
                 revision=registered.revision,
+                device=device_info.device,
                 cache_dir=cache_dir,
-                providers=_onnx_providers_for_device(device_info),
             )
             logger.info(
-                "Loaded %s (registry revision %s; fastembed pins its own) on %s",
+                "Loaded %s @ %s via ort (Rust) on %s",
                 registered.model_id,
                 registered.revision,
                 device_info.device,
             )
             return cls(
                 registered,
-                fe_backend,
+                rust_backend,
                 device=device_info,
-                backend_name="fastembed",
+                backend_name="ort",
             )
 
-    def embed(self, texts: list[str], *, batch_size: int = 32) -> np.ndarray:
+    def embed(self, texts: Iterable[str], *, batch_size: int = 32) -> np.ndarray:
         """Run inference and return a (N, dim) float32 array.
 
         Args:
-            texts: Input strings. Empty list returns a (0, dim) array.
+            texts: Input strings — any iterable (list, tuple, generator,
+                ``iter_paragraph_units(...)``-style stream, etc.).
+                Materialized internally so the backend can stack into
+                tensors. Empty input returns a ``(0, dim)`` array.
+                Audit KNT-601 (0.2.0) widened from ``list[str]``.
             batch_size: Inference batch size passed to the backend.
 
         Raises:
             EmbeddingError: On backend exception or shape mismatch.
         """
-        if not texts:
+        # Materialize the iterable once. The Rust backend stacks the
+        # batch into tensors, so an internal collection is unavoidable.
+        # Always copy through ``list(...)`` so the type stays
+        # ``list[str]`` regardless of whether the caller passed a list,
+        # tuple, or generator (avoids ty's Iterable→list narrowing
+        # complaint).
+        text_list: list[str] = list(texts)
+        if not text_list:
             return np.zeros((0, self.dim), dtype=np.float32)
 
+        # Audit KNT-601 (0.2.0): opt-in process-wide LRU cache. When
+        # enabled, look up each text first; collect misses, embed only
+        # those, splice cached and freshly-embedded rows back together
+        # by original-position index so the output ordering matches the
+        # input. Disabled by default (size 0) → straight passthrough.
+        if _EMBED_CACHE_SIZE > 0:
+            cached_rows: list[np.ndarray | None] = [None] * len(text_list)
+            miss_indices: list[int] = []
+            for i, t in enumerate(text_list):
+                cached_rows[i] = _embed_cache_get(self.model_id, self._registered.revision, t)
+                if cached_rows[i] is None:
+                    miss_indices.append(i)
+            # All hits: assemble the cached rows directly.
+            if not miss_indices:
+                # Every entry is non-None at this branch — narrow for ty.
+                rows: list[np.ndarray] = [r for r in cached_rows if r is not None]
+                return np.stack(rows, axis=0).astype(np.float32, copy=False)
+            # Some misses: embed the missing texts only.
+            miss_texts = [text_list[i] for i in miss_indices]
+            miss_arr = self._embed_uncached(miss_texts, batch_size=batch_size)
+            # Splice and write-back.
+            for offset, original_idx in enumerate(miss_indices):
+                row = miss_arr[offset]
+                cached_rows[original_idx] = row
+                _embed_cache_put(
+                    self.model_id, self._registered.revision, text_list[original_idx], row
+                )
+            rows = [r for r in cached_rows if r is not None]
+            return np.stack(rows, axis=0).astype(np.float32, copy=False)
+
+        # Cache disabled — straight path through the backend.
+        return self._embed_uncached(text_list, batch_size=batch_size)
+
+    def _embed_uncached(self, texts: list[str], *, batch_size: int) -> np.ndarray:
+        """The embed body that talks directly to the backend.
+
+        Factored out so the cache layer in ``embed()`` can route to it
+        for misses while still going through the same shape/dim
+        validation and L2-normalization contract.
+        """
         try:
-            # Audit-06 KNT-501: the sentence-transformers backend was removed
-            # in 0.1.0a6. fastembed and model2vec are the two surviving
-            # backends; both produce ``np.ndarray`` directly.
+            # Audit KNT-601 (0.2.0): two surviving backends after the
+            # fastembed retirement — ``ort`` (Rust, default) and
+            # ``model2vec`` (Python static lookup). Both produce
+            # ``np.ndarray`` directly.
             if self._backend_name == "model2vec":
                 # ``StaticModel.encode`` returns ``np.ndarray`` directly and
                 # respects the model's own ``normalize`` flag (defaults to
@@ -287,8 +395,11 @@ class EmbeddingModel:
                 )
                 arr = np.asarray(arr, dtype=np.float32)
             else:
-                vecs = list(self._backend.embed(texts, batch_size=batch_size))
-                arr = np.asarray(vecs, dtype=np.float32)
+                # ``ort`` path: ``PyEmbeddingBackend.embed`` returns a
+                # (N, dim) float32 numpy array directly, already
+                # L2-normalized inside Rust (audit KNT-101).
+                arr = self._backend.embed(texts, batch_size=batch_size)
+                arr = np.asarray(arr, dtype=np.float32)
         except Exception as exc:
             msg = (
                 f"Embedding inference failed for model {self.model_id!r} "
@@ -325,57 +436,19 @@ class EmbeddingModel:
 
 
 # ---------------------------------------------------------------------------
-# Free-threaded Python guard (audit-03 KNT-201)
+# Free-threaded Python guard (audit-03 KNT-201) — RETIRED in 0.2.0
 # ---------------------------------------------------------------------------
-
-
-def _is_free_threaded_python() -> bool:
-    """True when running under a Py_GIL_DISABLED interpreter (3.13t / 3.14t).
-
-    ``sys._is_gil_enabled()`` is part of the stable public-ish API since
-    CPython 3.13 (PEP 703); on older builds without GIL-disable support
-    the function does not exist, in which case we treat the interpreter
-    as GIL-enabled.
-    """
-    import sys as _sys
-
-    is_gil_enabled_fn = getattr(_sys, "_is_gil_enabled", None)
-    if is_gil_enabled_fn is None:
-        return False
-    return not bool(is_gil_enabled_fn())
-
-
-def _check_gil_enabled() -> None:
-    """Raise :class:`BackendNotInstalledError` on free-threaded Python.
-
-    fastembed pulls ``py_rust_stemmers`` (Rust/PyO3) for its sparse BM25
-    path AND ``tokenizers`` (Rust/PyO3) for the cross-encoder reranker.
-    Neither declares Py_GIL_DISABLED safety as of 2026-05-08, and both
-    crash with SIGSEGV during module init on Python 3.14t.
-
-    Audit-03 KNT-201 (originally) + audit-06 KNT-501 (post-torch-removal):
-    refuse at the API boundary so the user gets a clear error pointing at
-    the upstream tracker rather than a hard segfault. The migration off
-    sentence-transformers in 0.1.0a6 removed the ``transformers`` exposure
-    but py_rust_stemmers + tokenizers remain in fastembed's transitive
-    dep tree, so the guard stays. When the upstream wheels declare
-    Py_GIL_DISABLED, this check can be removed (no version pin needed;
-    upstream wheels resolve at runtime).
-    """
-    if _is_free_threaded_python():
-        msg = (
-            "kaos-nlp-transformers cannot load on a free-threaded Python "
-            "build (3.13t / 3.14t / etc.). fastembed's transitive "
-            "dependencies py_rust_stemmers (sparse BM25) and tokenizers "
-            "(reranker) crash (SIGSEGV) during module init under "
-            "Py_GIL_DISABLED. "
-            "Fix: switch to the GIL-enabled build of Python 3.13 or 3.14 "
-            "(`uv python install 3.14`, NOT 3.14t). "
-            "Alternative: track upstream py_rust_stemmers / tokenizers "
-            "free-threaded support; this guard is removed once those "
-            "wheels declare Py_GIL_DISABLED."
-        )
-        raise BackendNotInstalledError(msg)
+#
+# Audit KNT-601 (0.2.0): the ``_check_gil_enabled`` guard was removed
+# alongside the fastembed Python wrapper. fastembed transitively pulled
+# ``py_rust_stemmers`` (no Py_GIL_DISABLED support) and an old
+# ``tokenizers`` Python wrapper, both of which crashed under free-
+# threaded interpreters. Post-migration the package's only Rust surface
+# is the in-tree cdylib (``_rust.abi3.so``) which is built with
+# ``gil_used = false`` (audit KNT-602), and the Rust ``tokenizers``
+# crate is statically linked into that cdylib (no Python ``tokenizers``
+# import at runtime). Free-threaded Python is now supported. Tests that
+# regressed on the removed guard are deleted in P4.7.
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +489,81 @@ def _offline_env_scope(offline: bool) -> Iterator[None]:
 
 
 # ---------------------------------------------------------------------------
+# Embedding cache (KNT-601 — opt-in process-wide LRU)
+# ---------------------------------------------------------------------------
+#
+# Process-wide LRU keyed on ``(model_id, revision, blake2b(text))`` →
+# cached float32 vector. Disabled by default (size 0). Enabled via
+# ``KaosNLPTransformersSettings.embedding_cache_size`` > 0.
+#
+# Threading: the cache uses a single Lock for both reads and writes.
+# Embedding callers that go ``embed()`` → cache lookup → maybe-run →
+# cache write all hold the lock briefly. Heavy ort.run() work happens
+# OUTSIDE the lock (the lock is only held for the dict ops). This is
+# correct for free-threaded Python (KNT-602).
+
+
+_EMBED_CACHE_LOCK = threading.Lock()
+_EMBED_CACHE: OrderedDict[tuple[str, str, bytes], np.ndarray] = OrderedDict()
+_EMBED_CACHE_SIZE: int = 0
+
+
+def _hash_text(text: str) -> bytes:
+    """Hash a text into a stable cache key. blake2b is stdlib + fast."""
+    return hashlib.blake2b(text.encode("utf-8"), digest_size=16).digest()
+
+
+def _embed_cache_get(model_id: str, revision: str, text: str) -> np.ndarray | None:
+    """Return the cached vector for ``text`` or None on miss / disabled."""
+    if _EMBED_CACHE_SIZE <= 0:
+        return None
+    key = (model_id, revision, _hash_text(text))
+    with _EMBED_CACHE_LOCK:
+        v = _EMBED_CACHE.get(key)
+        if v is None:
+            return None
+        # LRU: move to end on hit.
+        _EMBED_CACHE.move_to_end(key)
+        return v
+
+
+def _embed_cache_put(model_id: str, revision: str, text: str, vector: np.ndarray) -> None:
+    """Store a vector for ``text``; evicts the oldest entry if at capacity."""
+    if _EMBED_CACHE_SIZE <= 0:
+        return
+    key = (model_id, revision, _hash_text(text))
+    with _EMBED_CACHE_LOCK:
+        _EMBED_CACHE[key] = vector
+        _EMBED_CACHE.move_to_end(key)
+        while len(_EMBED_CACHE) > _EMBED_CACHE_SIZE:
+            _EMBED_CACHE.popitem(last=False)
+
+
+def _embed_cache_set_size(size: int) -> None:
+    """Set the cache capacity. Sticky once non-zero (the FIRST non-zero
+    setting wins for the process); shrinking via this function evicts
+    LRU entries to fit. Calling with 0 is a no-op (the cache cannot be
+    disabled mid-process; that would invalidate cached vectors held by
+    callers). Audit KNT-601 (0.2.0)."""
+    global _EMBED_CACHE_SIZE
+    if size <= 0:
+        return
+    with _EMBED_CACHE_LOCK:
+        if _EMBED_CACHE_SIZE == 0:
+            _EMBED_CACHE_SIZE = size
+        elif size < _EMBED_CACHE_SIZE:
+            _EMBED_CACHE_SIZE = size
+            while len(_EMBED_CACHE) > _EMBED_CACHE_SIZE:
+                _EMBED_CACHE.popitem(last=False)
+
+
+def _embed_cache_clear() -> None:
+    """Test-only: clear the cache. Safe to call from any thread."""
+    with _EMBED_CACHE_LOCK:
+        _EMBED_CACHE.clear()
+
+
+# ---------------------------------------------------------------------------
 # L2 normalization (KNT-101)
 # ---------------------------------------------------------------------------
 
@@ -440,124 +588,156 @@ def _l2_normalize(arr: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-# Audit-06 KNT-501: ``"sentence-transformers"`` was removed from the valid-
-# backend set in 0.1.0a6 alongside the [torch] extra. fastembed (ONNX) and
-# model2vec (numpy) are the two surviving backends; both run on CPU by
-# default, fastembed escalates to GPU via onnxruntime-gpu (the [gpu] extra).
-_VALID_BACKENDS: frozenset[str] = frozenset({"auto", "fastembed", "model2vec"})
+# Audit KNT-601 (0.2.0): ``"fastembed"`` was retired in favor of the
+# Rust-native ``"ort"`` backend. The Python ``fastembed`` wrapper is no
+# longer in the dependency tree; the Rust cdylib calls libonnxruntime
+# directly via the ``ort`` Rust crate. ``"model2vec"`` (static numpy
+# lookup) stays as the second valid backend on its separate code path.
+# Pre-KNT-501 ``"sentence-transformers"`` was retired in 0.1.0a6.
+_VALID_BACKENDS: frozenset[str] = frozenset({"auto", "ort", "model2vec"})
+
+# Backwards-compat alias set: legacy values that should produce a
+# clear migration error rather than a confusing "unknown backend" error.
+_RETIRED_BACKENDS: dict[str, str] = {
+    "fastembed": (
+        "The Python fastembed wrapper was replaced by the Rust-native "
+        "'ort' backend in kaos-nlp-transformers 0.2.0 (audit KNT-601 — "
+        "same ONNX runtime under the hood, no Python boundary, "
+        "free-threaded Python compatible). Fix: use one of "
+        "['auto', 'ort', 'model2vec'], or leave the setting unset for "
+        "auto-detection. Alternative: pin to kaos-nlp-transformers<0.2 "
+        "if you specifically need the fastembed Python wrapper "
+        "(not recommended — superseded)."
+    ),
+    "sentence-transformers": (
+        "The sentence-transformers backend was retired in 0.1.0a6 "
+        "(audit KNT-501). Fix: use 'auto', 'ort', or 'model2vec'."
+    ),
+}
 
 
 def _resolve_backend(requested: str, device: DeviceInfo, registry_backend: str) -> str:
     """Determine which backend to use given user preference and device.
 
     Audit-02 KNT-107: ``requested`` is validated against the closed set of
-    backend names. Unknown values (typos like ``"tensorflow"`` /
-    ``"sentence-transformers"`` post-0.1.0a6) raise ``ValueError`` with the
-    valid set rather than silently falling through.
+    backend names. Unknown values raise ``ValueError`` with the valid set
+    rather than silently falling through.
 
     Audit-04 KNT-302: ``"model2vec"`` is honored as both an explicit
     backend choice and an auto-resolution target. model2vec models are
     *static* (vocab → vector lookup); the loader pins them to CPU
     regardless of the requested device.
 
-    Audit-06 KNT-501: post-torch-removal, the auto-resolution is just
-    "registry decides." Both fastembed and model2vec run on CPU; fastembed
-    additionally accepts a GPU device via onnxruntime providers. There is
-    no "GPU → switch to a different backend" branch anymore — fastembed
-    is the GPU path.
+    Audit KNT-601 (0.2.0): post-fastembed-removal, the auto-resolution
+    is "registry decides." Both ``ort`` and ``model2vec`` run on CPU;
+    ``ort`` accepts GPU via the [gpu] companion wheel (ort/cuda EP).
+    Legacy ``"fastembed"`` requests raise ``ValueError`` with the
+    migration text from ``_RETIRED_BACKENDS``.
 
-    Returns 'fastembed' or 'model2vec'.
+    Returns 'ort' or 'model2vec'.
     """
+    if requested in _RETIRED_BACKENDS:
+        msg = f"Invalid backend {requested!r}. {_RETIRED_BACKENDS[requested]}"
+        raise ValueError(msg)
     if requested not in _VALID_BACKENDS:
         msg = (
             f"Invalid backend {requested!r}. "
             f"Fix: use one of {sorted(_VALID_BACKENDS)}. "
             "Alternative: leave the setting unset to use the auto-detected "
-            "backend (registry decides — fastembed for ONNX models, "
+            "backend (registry decides — ort for ONNX models, "
             "model2vec for static lookup models)."
         )
         raise ValueError(msg)
 
-    if requested == "fastembed":
-        return "fastembed"
+    if requested == "ort":
+        return "ort"
     if requested == "model2vec":
         return "model2vec"
 
-    # auto: registry decides. fastembed handles GPU via onnxruntime
-    # providers, so there's no device-specific override here.
+    # auto: registry decides. ort handles GPU via the companion wheel
+    # (ort/cuda EP), so there's no device-specific override here.
     if registry_backend == "model2vec":
         return "model2vec"
-    return "fastembed"
-
-
-def _onnx_providers_for_device(device: DeviceInfo) -> tuple[str, ...] | None:
-    """Map DeviceInfo to ONNX Runtime execution providers, or None for default."""
-    if device.device.startswith("cuda"):
-        return ("CUDAExecutionProvider", "CPUExecutionProvider")
-    if device.device == "openvino":
-        return ("OpenVINOExecutionProvider", "CPUExecutionProvider")
-    return None
+    return "ort"
 
 
 # ---------------------------------------------------------------------------
 # Backend loaders (cached)
 # ---------------------------------------------------------------------------
+#
+# Audit KNT-601 (0.2.0): ``_onnx_providers_for_device`` was retired
+# alongside fastembed. EP selection moved into the Rust backend's
+# ``configure_eps`` (rust/core/ort_runtime.rs) which gates CUDA /
+# OpenVINO behind the ``gpu`` / ``openvino`` cargo features.
 
 
 @lru_cache(maxsize=8)
-def _load_fastembed_cached(
+def _load_rust_embedding_cached(
     model_id: str,
     revision: str,
+    device: str,
     cache_dir: str | None,
-    providers: tuple[str, ...] | None = None,
 ):
-    """Process-wide cache of loaded fastembed backends.
+    """Process-wide cache of loaded Rust embedding backends.
 
-    Loading a fastembed model parses the ONNX file and allocates
-    runtime sessions, both of which are heavyweight. Caching here
-    means repeated ``EmbeddingModel.load(same_id)`` calls in the same
-    process are O(1).
+    Audit KNT-601 (Phase 3): the Rust ``PyEmbeddingBackend.load`` is
+    relatively heavy (download ONNX + tokenizer, build ort Session,
+    optimization pass) so caching by ``(model_id, revision, device,
+    cache_dir)`` matters for the long-running MCP server case where
+    a process embeds many calls back-to-back.
 
-    Note: ``revision`` is part of the cache key but NOT passed to
-    fastembed. fastembed maintains its own model registry with a fixed
-    revision per release; runtime revision override is not supported.
-    Registry mismatches still invalidate the cache (different revision →
-    different cache key → fresh load).
+    The ``revision`` is part of the cache key. Unlike fastembed-rs
+    (which can't honor a runtime revision override), our Rust loader
+    DOES pin the SHA at HF Hub fetch time — see the KNT-003 contract
+    in ``rust/core/model_loader.rs::resolve_paths``.
     """
     try:
-        from fastembed import TextEmbedding  # type: ignore[import-not-found]
+        from kaos_nlp_transformers._rust.embedding import (
+            EmbeddingBackend,  # type: ignore[import-not-found]
+        )
     except ImportError as exc:
         msg = (
-            "fastembed is not installed. "
-            "Fix: install it via `uv add fastembed` or `pip install fastembed`. "
-            "Alternative: install kaos-nlp-transformers with the default extras "
-            "which include fastembed as a hard dep."
+            "kaos_nlp_transformers._rust extension is not built. "
+            "Fix: run `uv run maturin develop --release` to compile the "
+            "Rust cdylib for editable installs, or reinstall the package "
+            "from a released wheel. "
+            "Alternative: pin to kaos-nlp-transformers<0.2 if you need "
+            "the legacy fastembed Python backend."
         )
         raise BackendNotInstalledError(msg) from exc
 
     try:
-        kwargs: dict[str, Any] = {"model_name": model_id}
-        if cache_dir:
-            kwargs["cache_dir"] = cache_dir
-        if providers:
-            kwargs["providers"] = list(providers)
-        return TextEmbedding(**kwargs)
+        # The Rust loader takes the device string directly; cache_dir
+        # may be None to fall back to HF_HOME / system default.
+        return EmbeddingBackend.load(model_id, device=device, cache_dir=cache_dir)
     except Exception as exc:
+        # The Rust path raises through bindings/util.rs::map_backend_error,
+        # which already surfaces as kaos_nlp_transformers.errors.*Error.
+        # Wrap any other Python-side exception into ModelLoadError so the
+        # public contract holds.
+        if isinstance(exc, BackendNotInstalledError | ModelLoadError | ModelNotRegisteredError):
+            raise
+        # Cache key is (model_id, revision, device, cache_dir); revision
+        # is part of the key but the Rust loader uses it via the registry
+        # entry, not directly here.
+        _ = revision
         msg = (
-            f"Failed to load model {model_id!r} via fastembed: {exc}. "
+            f"Failed to load model {model_id!r} via the Rust ort backend: {exc}. "
             "Fix: verify network access on first download, or set "
             "KAOS_NLP_TRANSFORMERS_OFFLINE=false. "
-            f"Alternative: pre-download via `python -m fastembed download "
-            f"--model {model_id}`, or check that the model id matches a "
-            "fastembed-supported model."
+            f"Alternative: unset KAOS_NLP_TRANSFORMERS_BACKEND to fall back "
+            "to the fastembed default (Phase 3 only — Phase 4 retires this)."
         )
         raise ModelLoadError(msg) from exc
 
 
-# Audit-06 KNT-501: ``_load_sentence_transformers_cached`` removed in
-# 0.1.0a6. The sentence-transformers backend is gone; GPU embedding is
-# served by fastembed + onnxruntime-gpu via _load_fastembed_cached above
-# (the providers list is the only thing that changes between CPU and GPU).
+# Audit KNT-601 (0.2.0): ``_load_fastembed_cached`` retired. The Rust
+# backend loader ``_load_rust_embedding_cached`` (defined above) is
+# now the sole ONNX-backed embedding loader. Pre-KNT-501 (0.1.0a6)
+# the sentence-transformers cached loader was retired in the same
+# spirit. The legacy fastembed branch in ``EmbeddingModel.load`` is
+# also gone; ``_resolve_backend`` only returns ``"ort"`` or
+# ``"model2vec"``, never the retired backend names.
 
 
 def _vendored_model_path(model_id: str) -> Path | None:

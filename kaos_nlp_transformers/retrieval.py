@@ -1,17 +1,30 @@
 """EmbeddingRetriever -- dense retrieval via embedding similarity search.
 
+.. deprecated:: 0.2.0
+    Use ``kaos_content.indexing.SearchableDocument(retrieval="embeddings")``
+    or the upcoming ``kaos_content.indexing.SearchableCorpus`` for
+    AST-grounded retrieval. Those preserve ``block_ref`` / ``page`` /
+    ``section_ref`` provenance through to results, which this
+    text-only retriever does not. Scheduled for removal in 0.3.0.
+
 Builds a numpy matrix of document embeddings at construction time.
 Queries embed the query text, then compute cosine similarity against
 all document embeddings.  For corpora up to ~50K documents, brute-force
 numpy dot product is faster than FAISS overhead.
 
 This module lives in kaos-nlp-transformers because it depends on
-``EmbeddingModel`` (fastembed/numpy).  The ``Retriever`` protocol
-it implements lives in kaos-nlp-core.
+``EmbeddingModel``.  The ``Retriever`` protocol it implements lives
+in kaos-nlp-core.
+
+Audit KNT-601 (0.2.0): the embedding backend moved from fastembed
+(Python) to ort (Rust cdylib); this module is unaffected — it operates
+above the backend layer and reaches embeddings through
+``EmbeddingModel.embed`` which preserved its public contract.
 """
 
 from __future__ import annotations
 
+import warnings
 from collections import OrderedDict
 from typing import Any
 
@@ -101,6 +114,14 @@ def _group_corpus_units_for_embedding(
 class EmbeddingRetriever:
     """Dense retrieval via cosine similarity over pre-embedded documents.
 
+    .. deprecated:: 0.2.0
+        Use ``kaos_content.indexing.SearchableDocument(retrieval="embeddings")``
+        for single-document AST-grounded retrieval, or the upcoming
+        ``kaos_content.indexing.SearchableCorpus`` for cross-document
+        retrieval. Both preserve ``block_ref`` / ``page`` /
+        ``section_ref`` provenance which this text-only retriever does
+        not. Scheduled for removal in 0.3.0.
+
     Typical usage::
 
         retriever = EmbeddingRetriever.from_texts(
@@ -127,6 +148,9 @@ class EmbeddingRetriever:
         model: EmbeddingModel,
     ) -> None:
         """
+        .. deprecated:: 0.2.0
+            See class-level deprecation notice. Removal scheduled for 0.3.0.
+
         Args:
             embeddings: Pre-computed embeddings of shape ``(N, dim)``.
                 Will be L2-normalized internally.
@@ -137,6 +161,23 @@ class EmbeddingRetriever:
             model: The ``EmbeddingModel`` used to produce *embeddings*
                 (also used to embed queries at retrieval time).
         """
+        # Audit KNT-601 (0.2.0): emit a DeprecationWarning per
+        # construction. Use stacklevel=2 so the warning points at the
+        # caller, not this constructor. The MCP / CLI / serve callers
+        # in-tree are left as-is — they swallow this warning because
+        # the public retrieval MCP tool surface has its own removal
+        # cadence; users get the message via stacklevel=2.
+        warnings.warn(
+            "EmbeddingRetriever is deprecated as of kaos-nlp-transformers "
+            "0.2.0 and scheduled for removal in 0.3.0. "
+            "Fix: use kaos_content.indexing.SearchableDocument("
+            "retrieval='embeddings') for single-document AST-grounded "
+            "retrieval, or kaos_content.indexing.SearchableCorpus for "
+            "cross-document retrieval. Both preserve block_ref / page "
+            "/ section_ref provenance.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if embeddings.ndim != 2:
             msg = f"embeddings must be 2-D, got shape {embeddings.shape}"
             raise ValueError(msg)

@@ -114,7 +114,7 @@ class SystemDevices:
         """Return the highest-priority reachable device (first GPU, or CPU)."""
         if self.devices:
             return self.devices[0]
-        return DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+        return DeviceInfo(name="CPU", device="cpu", backend="ort")
 
     @property
     def has_gpu(self) -> bool:
@@ -130,7 +130,7 @@ class SystemDevices:
         for d in self.devices:
             if d.device == "cpu":
                 return d
-        return DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+        return DeviceInfo(name="CPU", device="cpu", backend="ort")
 
     @property
     def has_latent_gpu(self) -> bool:
@@ -139,39 +139,46 @@ class SystemDevices:
 
 
 # ---------------------------------------------------------------------------
-# Reachable-device probes (onnxruntime — Python-level)
+# Reachable-device probes (Rust cdylib — capabilities flag set at build time)
 # ---------------------------------------------------------------------------
 
 
-def _detect_onnx_providers() -> list[str]:
-    """Return available ONNX Runtime execution providers.
+def _detect_rust_capabilities() -> dict[str, Any]:
+    """Return the Rust cdylib's compile-time capability flags.
 
-    Audit-06 KNT-501: post-torch-removal, onnxruntime is the only Python-
-    level reachable-device probe. CUDA / OpenVINO / CoreML / ROCm all
-    surface here as execution-provider names. The matching OS-level
-    probes (nvidia-smi, /dev/kfd, platform.machine) backfill the
-    "physically present but Python-unreachable" latent-device list.
+    Audit KNT-601 (0.2.0): replaces ``_detect_onnx_providers``.
+    Whether GPU / OpenVINO are reachable is a property of *how the wheel
+    was built*, not which Python packages are installed. The Rust core's
+    ``capabilities()`` returns a dict of feature flags
+    (``{cpu, cuda, openvino, build_features}``); we read those to drive
+    GPU enumeration and the latent-device hint logic below.
+
+    Returns ``{"cpu": True}`` even if the cdylib import fails, so the
+    Python-only fallback path (model2vec) keeps working with a
+    CPU-only DeviceInfo.
     """
     try:
-        import onnxruntime as ort
+        from kaos_nlp_transformers._rust.registry import (
+            capabilities,  # type: ignore[import-not-found]
+        )
 
-        return list(ort.get_available_providers())
+        return dict(capabilities())
     except ImportError:
-        return []
+        return {"cpu": True, "cuda": False, "openvino": False, "build_features": []}
 
 
-def _detect_reachable_gpus(onnx_providers: list[str]) -> list[DeviceInfo]:
-    """Build the reachable-GPU list from the ONNX providers + nvidia-smi.
+def _detect_reachable_gpus(rust_capabilities: dict[str, Any]) -> list[DeviceInfo]:
+    """Build the reachable-GPU list from cdylib capabilities + nvidia-smi.
 
-    Audit-06 KNT-501: replaces the old ``_detect_torch_devices``. The
-    pattern: if ``CUDAExecutionProvider`` is in ``onnx_providers``,
-    every NVIDIA GPU surfaced by ``nvidia-smi`` is a reachable
-    ``cuda:N`` device. fastembed (or any onnxruntime-gpu consumer)
-    can target it directly. If onnxruntime-gpu is NOT installed, the
-    GPUs go to the latent list with ``install_extra="gpu"``.
+    Audit KNT-601 (0.2.0): replaces the onnxruntime-providers-driven
+    pattern. If the cdylib was built with ``--features gpu`` AND
+    ``nvidia-smi`` sees cards, every card is a reachable ``cuda:N``
+    device. If the cdylib lacks the GPU feature, the cards go to the
+    latent list with ``install_extra="gpu"`` (install the
+    ``kaos-nlp-transformers-gpu`` companion wheel).
     """
     devices: list[DeviceInfo] = []
-    if "CUDAExecutionProvider" not in onnx_providers:
+    if not rust_capabilities.get("cuda", False):
         return devices
     for row in _run_nvidia_smi():
         try:
@@ -186,7 +193,7 @@ def _detect_reachable_gpus(onnx_providers: list[str]) -> list[DeviceInfo]:
             DeviceInfo(
                 name=row.get("name", "NVIDIA GPU"),
                 device=f"cuda:{idx}",
-                backend="fastembed",
+                backend="ort",
                 memory_mb=mem_mb,
             )
         )
@@ -285,10 +292,11 @@ def _probe_nvidia() -> list[LatentDevice]:
                 name=row["name"],
                 kind="cuda",
                 reason=(
-                    "onnxruntime-gpu is not installed; the GPU is visible to "
-                    "the driver but not to this Python process. Audit-06 "
-                    "KNT-501: torch is no longer required — the GPU on-ramp "
-                    "is the [gpu] extra (onnxruntime-gpu)."
+                    "kaos-nlp-transformers was not built with the GPU "
+                    "feature flag; the NVIDIA card is visible to the "
+                    "driver but the cdylib's CUDA EP is gated off. "
+                    "Audit KNT-601 (0.2.0): the GPU on-ramp is the "
+                    "kaos-nlp-transformers-gpu companion wheel."
                 ),
                 install_extra="gpu",
                 detail={
@@ -347,19 +355,22 @@ def _probe_apple() -> list[LatentDevice]:
 
 
 def _detect_latent_devices(
-    reachable: list[DeviceInfo], onnx_providers: list[str]
+    reachable: list[DeviceInfo], rust_capabilities: dict[str, Any]
 ) -> list[LatentDevice]:
     """Run all OS-level probes and reconcile against reachable devices.
 
-    A probe-detected GPU is considered LATENT only if no reachable GPU of the
-    same kind already covers it. We compare by ``kind`` (cuda/rocm/mps) and
-    by **count**, not by name match — when torch sees the GPUs, it does so
-    fully, and we don't want false-positive latents in that case.
+    A probe-detected GPU is considered LATENT only if no reachable GPU
+    of the same kind already covers it. We compare by ``kind``
+    (cuda/rocm/mps) and by **count**, not by name match.
 
-    The reconciliation also folds in the onnxruntime-gpu detection: if torch
-    isn't installed but ``CUDAExecutionProvider`` is in onnx_providers, we
-    still say the NVIDIA GPU is reachable (via fastembed), so it's not
-    latent. The current registry default is fastembed, so this matters.
+    Audit KNT-601 (0.2.0): the reconciliation now folds in the Rust
+    cdylib's compile-time capability flags. If the wheel was built
+    without ``--features gpu`` (the CPU-only base wheel), every NVIDIA
+    card the OS probes find goes to the latent list with
+    ``install_extra="gpu"`` so the user can install the
+    ``kaos-nlp-transformers-gpu`` companion. If the GPU wheel IS
+    installed and a card is reachable, the OS-probe duplicates are
+    excluded from the latent list.
     """
     candidates: list[LatentDevice] = []
     candidates.extend(_probe_nvidia())
@@ -376,14 +387,12 @@ def _detect_latent_devices(
             reachable_by_kind["cuda"] = reachable_by_kind.get("cuda", 0) + 1
         elif d.device == "mps":
             reachable_by_kind["mps"] = reachable_by_kind.get("mps", 0) + 1
-        # ROCm presents as CUDA in PyTorch — already counted above.
 
-    # If onnxruntime-gpu is present, fastembed can drive NVIDIA cards even
-    # without torch. Treat the NVIDIA group as reachable in that case.
-    if "CUDAExecutionProvider" in onnx_providers and reachable_by_kind.get("cuda", 0) == 0:
-        # Pretend torch saw them so we don't list every GPU as latent — the
-        # actual reachable_devices list won't gain entries (we only build
-        # those from torch), but the latent list correctly excludes them.
+    # If the cdylib was built with --features gpu, ort can drive NVIDIA
+    # cards directly. Treat the NVIDIA group as reachable in that case
+    # (the actual reachable_devices list comes from _detect_reachable_gpus
+    # above which already gates on this flag).
+    if rust_capabilities.get("cuda", False) and reachable_by_kind.get("cuda", 0) == 0:
         reachable_by_kind["cuda"] = sum(1 for c in candidates if c.kind == "cuda")
 
     out: list[LatentDevice] = []
@@ -411,20 +420,31 @@ def detect_devices() -> SystemDevices:
     reachable GPU does — the silent-CPU-fallback failure mode this guard
     was built to fix.
     """
-    onnx_providers = _detect_onnx_providers()
-    gpu_devices = _detect_reachable_gpus(onnx_providers)
-    latent = _detect_latent_devices(gpu_devices, onnx_providers)
+    rust_capabilities = _detect_rust_capabilities()
+    gpu_devices = _detect_reachable_gpus(rust_capabilities)
+    latent = _detect_latent_devices(gpu_devices, rust_capabilities)
 
     # Sort GPU devices by memory descending (prefer bigger GPUs)
     gpu_devices.sort(key=lambda d: d.memory_mb, reverse=True)
 
     # Always include CPU as fallback
-    cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+    cpu = DeviceInfo(name="CPU", device="cpu", backend="ort")
     all_devices = (*gpu_devices, cpu)
+
+    # Audit KNT-601 (0.2.0): SystemDevices.onnx_providers is preserved
+    # for backwards compatibility but is now derived from the cdylib's
+    # capability flags rather than queried from the onnxruntime Python
+    # package (which is no longer in the dep tree). The values are
+    # synthetic strings matching what onnxruntime would have reported.
+    synthetic_providers: list[str] = ["CPUExecutionProvider"]
+    if rust_capabilities.get("cuda", False):
+        synthetic_providers.insert(0, "CUDAExecutionProvider")
+    if rust_capabilities.get("openvino", False):
+        synthetic_providers.insert(0, "OpenVINOExecutionProvider")
 
     result = SystemDevices(
         devices=all_devices,
-        onnx_providers=tuple(onnx_providers),
+        onnx_providers=tuple(synthetic_providers),
         latent_devices=tuple(latent),
     )
 
@@ -432,10 +452,10 @@ def detect_devices() -> SystemDevices:
         names = ", ".join(f"{d.name} ({d.device}, {d.memory_mb}MB)" for d in gpu_devices)
         logger.info("Detected GPU devices: %s", names)
     elif latent:
-        # The motivating fix: on a GPU box where the user installed only the
-        # base package, the OS probes find the GPU but the Python probes
-        # don't. Don't bury this at debug — the user is paying for silicon
-        # they're not using.
+        # On a GPU box where only the CPU wheel is installed, the OS
+        # probes find the GPU but the Rust cdylib's CUDA EP is gated
+        # off. Don't bury this at debug — the user is paying for
+        # silicon they're not using.
         hints = "; ".join(
             f"{d.name} ({d.kind}) — pip install kaos-nlp-transformers[{d.install_extra}]"
             if d.install_extra
@@ -450,7 +470,7 @@ def detect_devices() -> SystemDevices:
         )
     else:
         logger.debug("No GPU devices detected; using CPU")
-    logger.debug("ONNX Runtime providers: %s", onnx_providers)
+    logger.debug("Rust cdylib capabilities: %s", rust_capabilities)
 
     return result
 
@@ -508,7 +528,7 @@ def resolve_device(requested: str, system: SystemDevices | None = None) -> Devic
             return DeviceInfo(
                 name="Intel OpenVINO",
                 device="openvino",
-                backend="fastembed",
+                backend="ort",
             )
         msg = (
             "OpenVINO requested but OpenVINOExecutionProvider not available. "

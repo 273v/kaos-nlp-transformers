@@ -35,9 +35,10 @@ class RegisteredModel:
     """Embedding dimension produced by this model."""
 
     backend: str
-    """Which backend supports this model: 'fastembed' (ONNX) or 'model2vec'
-    (static numpy lookup). Audit-06 KNT-501: ``'sentence-transformers'``
-    was retired alongside the ``[torch]`` extra in 0.1.0a6."""
+    """Which backend supports this model: ``'ort'`` (Rust + libonnxruntime)
+    or ``'model2vec'`` (static numpy lookup). Audit history:
+    ``'sentence-transformers'`` retired in KNT-501 (0.1.0a6);
+    ``'fastembed'`` retired in KNT-601 (0.2.0)."""
 
     notes: str = ""
     """Free-form notes (default model? legal-doc default? etc.)."""
@@ -73,7 +74,7 @@ REGISTRY: dict[str, RegisteredModel] = {
         license="MIT",
         params_m=33,
         dim=384,
-        backend="fastembed",
+        backend="ort",
         notes="Default v0 embedding model. CPU-friendly, English. Verified 2026-04-09.",
     ),
     "minishlab/potion-retrieval-32M": RegisteredModel(
@@ -176,7 +177,7 @@ RERANKER_REGISTRY: dict[str, RegisteredModel] = {
         # Audit-06 KNT-501: was "sentence-transformers" pre-0.1.0a6;
         # fastembed.TextCrossEncoder now serves this same model via ONNX,
         # so the registered backend is fastembed.
-        backend="fastembed",
+        backend="ort",
         notes="Default v0 reranker. CPU-friendly cross-encoder. Verified 2026-05-08.",
     ),
 }

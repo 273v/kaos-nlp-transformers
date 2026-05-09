@@ -11,24 +11,25 @@
 [![CI](https://github.com/273v/kaos-nlp-transformers/actions/workflows/ci.yml/badge.svg)](https://github.com/273v/kaos-nlp-transformers/actions/workflows/ci.yml)
 
 `kaos-nlp-transformers` is the dense-embedding and small-model inference
-layer for KAOS — a typed Python API over [`fastembed`](https://github.com/qdrant/fastembed)
-(ONNX-only, no PyTorch in the BASE install) that turns text into
-float32 vectors and back. It ships a license-vetted model registry, a
-shared `EmbeddingRetriever` for cosine similarity search, an optional
-cross-encoder reranker, and a semantic-dedup level that plugs into
-`kaos-content`'s deduplication framework.
+layer for KAOS — a typed Python API over an in-tree Rust cdylib that
+calls [`ort`](https://github.com/pykeio/ort) (libonnxruntime via Rust)
+to turn text into float32 vectors and back. It ships a license-vetted
+model registry, an optional cross-encoder reranker, and a semantic-dedup
+level that plugs into `kaos-content`'s deduplication framework.
 
-It is dependency-light at the BASE: the install pulls in
-`fastembed` (Apache-2.0) and the core KAOS runtime (`kaos-core`,
-`kaos-content`, `kaos-nlp-core`) plus `numpy`. **No PyTorch.** Both
-embedding (`EmbeddingModel`) and cross-encoder reranking
-(`CrossEncoderReranker`) run through the same ONNX runtime, so the
-default install handles every model in the registry on CPU out of the
-box. Optional extras layer in acceleration and adjacent surfaces —
-`[gpu]` for ONNX Runtime CUDA, `[openvino]` for Intel OpenVINO,
+It is dependency-light at the BASE: the install pulls in only `numpy`,
+`huggingface_hub`, and the core KAOS runtime (`kaos-core`,
+`kaos-content`, `kaos-nlp-core`). **No PyTorch, no Python `fastembed`,
+no Python `onnxruntime`** — the inference path is a Rust cdylib
+(`kaos_nlp_transformers._rust`) shipped inside the wheel; libonnxruntime
+is statically linked. Both embedding (`EmbeddingModel`) and
+cross-encoder reranking (`CrossEncoderReranker`) run through the same
+backend on CPU out of the box. Optional extras layer in adjacencies —
+`[gpu]` for the GPU companion wheel (ort/cuda EP, NVIDIA),
+`[openvino]` for Intel OpenVINO acceleration,
 `[model2vec]` for the static-numpy lookup backend (~500x CPU speedup),
 `[clustering]` for SciPy-backed semantic dedup, and `[mcp]` for the
-MCP tool surface.
+MCP tool surface. Free-threaded Python (3.13t / 3.14t) is supported.
 
 ## Install
 
@@ -38,27 +39,35 @@ uv add kaos-nlp-transformers
 pip install kaos-nlp-transformers
 ```
 
-`kaos-nlp-transformers` requires Python **3.13** or newer. The default
-install is fastembed-only (CPU + ONNX). Add the extras you need:
+`kaos-nlp-transformers` requires Python **3.13** or newer (free-threaded
+3.13t / 3.14t supported). The default install is CPU-only via the Rust
+ort backend. Add the extras you need:
 
 ```bash
-uv add "kaos-nlp-transformers[gpu]"          # NVIDIA CUDA via onnxruntime-gpu
-uv add "kaos-nlp-transformers[openvino]"     # Intel CPU / GPU acceleration
+uv add "kaos-nlp-transformers[gpu]"          # NVIDIA CUDA companion wheel (0.2.0a2)
+uv add "kaos-nlp-transformers[openvino]"     # Intel CPU / GPU acceleration (0.2.0a2)
 uv add "kaos-nlp-transformers[model2vec]"    # Static-numpy backend (~500x CPU)
 uv add "kaos-nlp-transformers[clustering]"   # SemanticDedupLevel (scipy)
 uv add "kaos-nlp-transformers[mcp]"          # MCP tool surface
 ```
 
-> **0.1.0a6 migration note.** Audit-06 KNT-501 retired the `[torch]`
-> extra — the package no longer depends on PyTorch or
-> `sentence-transformers`. `pip install kaos-nlp-transformers[torch]`
-> still resolves (as a no-op alias) for one release cycle so existing
-> CI and lockfiles keep working; new code should use `[gpu]` for CUDA
-> acceleration. The `[torch]` alias is removed in 0.3.0.
+> **0.2.0 migration note (KNT-601).** Audit KNT-601 retired the Python
+> `fastembed` wrapper. Inference now goes through a Rust cdylib
+> (`ort` + libonnxruntime, statically linked). Same models, same
+> outputs (per-row cosine ≥ 0.9999 vs the prior backend). The
+> `EmbeddingModel.load` / `EmbeddingModel.embed` /
+> `CrossEncoderReranker` public API is unchanged. The `[gpu]` /
+> `[openvino]` extras are no-op stubs in 0.2.0a1; the GPU companion
+> wheel ships in 0.2.0a2. The `[torch]` no-op alias from KNT-501 is
+> still preserved for one more cycle; removed in 0.3.0. The
+> `EmbeddingRetriever` text-only retriever is deprecated in favor of
+> `kaos_content.indexing.SearchableDocument` and
+> `kaos_content.indexing.SearchableCorpus`; removal scheduled for 0.3.0.
 
-Platform coverage: any platform with a CPython 3.13+ wheel and ONNX
-Runtime support — the `fastembed` wheel matrix covers Linux x86_64 +
-aarch64 (manylinux), macOS x86_64 + arm64, and Windows x86_64.
+Platform coverage: per-platform `cp313-abi3` wheels for Linux x86_64 +
+aarch64 (manylinux + musllinux), macOS aarch64, Windows x86_64 +
+aarch64. Free-threaded Python (3.13t / 3.14t) loads cleanly — no
+`_check_gil_enabled` guard, no `py_rust_stemmers` SIGSEGV path.
 
 ## Quick start
 

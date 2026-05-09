@@ -7,27 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### In progress (Audit KNT-601 — Rust backend migration)
+## [0.2.0] — KNT-601 Rust backend cutover
 
-The 0.2.0 release replaces the Python ``fastembed`` wrapper with a
-Rust cdylib that calls [ort](https://github.com/pykeio/ort) directly
-on the same ONNX models we ship today. The full plan lives at
-[docs/MIGRATION_0_2_0.md](docs/MIGRATION_0_2_0.md). Phase 1 (the
-scaffolding cut point) ships in [Unreleased] without behavior change:
+Audit-07 release. The Python ``fastembed`` wrapper is **retired
+entirely**; embedding and reranker inference now go through an in-tree
+Rust cdylib (``kaos_nlp_transformers._rust``) that calls
+libonnxruntime via [ort](https://github.com/pykeio/ort). Same ONNX
+models, same outputs (cosine ≥ 0.9999 vs frozen reference vectors),
+but free-threaded Python compatible and one fewer Python boundary in
+the inference path. Detailed plan:
+[docs/MIGRATION_0_2_0.md](docs/MIGRATION_0_2_0.md).
 
-- New top-level ``Cargo.toml`` and ``rust/`` crate (PyO3 ``abi3-py313``,
-  ``gil_used = false``).
-- Build backend flipped from ``hatchling`` to ``maturin``.
-- Version source is now ``Cargo.toml [package].version`` — Python
-  ``__version__`` reads from installed package metadata.
-- ``deny.toml`` configured for cargo-deny supply-chain checks.
-- New build dep: ``maturin>=1.8,<2.0`` in the dev group.
-- Existing public API is unchanged at this cut point. ``fastembed`` and
-  ``onnxruntime`` are still in the dependency tree.
+### Removed
 
-The Rust core, PyO3 bindings, and the experimental backend flag land
-in subsequent phases. The default backend remains ``fastembed`` until
-Phase 4 (P4.1) flips it to ``ort``.
+- **KNT-601 (HIGH) — fastembed Python wrapper retired.** The
+  ``fastembed`` Python dep is gone, along with its transitive
+  ``onnxruntime``, ``tokenizers`` (Python wrapper), and
+  ``py_rust_stemmers``. Inference goes through the Rust cdylib's
+  ``EmbeddingBackend`` / ``CrossEncoderBackend`` (ort + libonnxruntime
+  + tokenizers Rust crate, all statically linked). Model coverage
+  unchanged — ``BAAI/bge-small-en-v1.5`` (embedding) and
+  ``BAAI/bge-reranker-base`` (reranker) load from the same pinned
+  HF Hub revisions; outputs are bit-equivalent. Audit-01 KNT-003
+  (revision pinning) is now correct by construction — the Rust loader
+  passes ``revision`` to ``hf-hub`` explicitly, where fastembed used
+  release-baked SHAs.
+- **Audit-03 KNT-201 free-threaded guard removed.** The
+  ``_check_gil_enabled`` refusal at ``EmbeddingModel.load`` /
+  ``CrossEncoderReranker.load`` is gone. The Rust cdylib declares
+  ``gil_used = false`` (audit KNT-602), and the Rust ``tokenizers``
+  crate (statically linked into the cdylib) doesn't have the
+  ``py_rust_stemmers`` SIGSEGV path. Free-threaded Python (3.13t /
+  3.14t) loads cleanly.
+- ``_load_fastembed_cached``, ``_load_cross_encoder_cached`` (both
+  rewritten to call the Rust backend), and ``_onnx_providers_for_device``
+  (replaced by Rust-side EP gating).
+
+### Changed
+
+- **Build backend: ``hatchling`` → ``maturin>=1.8``.** Per-platform
+  abi3 wheels (cp313-abi3) for Linux x86_64 / aarch64 (manylinux +
+  musllinux), macOS aarch64, Windows x86_64 / aarch64.
+- ``EmbeddingModel.backend_name`` returns ``"ort"`` (was
+  ``"fastembed"``) for the default registry path. ``"model2vec"``
+  unchanged.
+- ``RegisteredModel.backend`` valid set narrowed to ``{"ort", "model2vec"}``.
+- ``KaosNLPTransformersSettings.backend`` valid set narrowed to
+  ``{"auto", "ort", "model2vec"}``. Legacy values (``"fastembed"``,
+  ``"sentence-transformers"``) raise ``ValueError`` with a migration
+  message pointing at the Rust path.
+- ``device.detect_devices()`` and ``device.SystemDevices`` now read
+  the cdylib's compile-time capability flags via
+  ``_rust.registry.capabilities()`` instead of asking the Python
+  ``onnxruntime`` package for execution providers. The ``[gpu]``
+  install hint flips from "install ``onnxruntime-gpu``" to
+  "install the ``kaos-nlp-transformers-gpu`` companion wheel".
+- Version source is now ``Cargo.toml [package].version``. Python
+  ``__version__`` reads from installed package metadata
+  (``importlib.metadata``); editable builds fall back to the
+  cdylib's Cargo SemVer string.
+
+### Added
+
+- **``EmbeddingModel.embed(texts: Iterable[str])``.** Accepts any
+  iterable (was ``list[str]`` only). Generators / lazy stream
+  consumers can pass through without an explicit ``list()`` step.
+- **``EmbeddingModel.max_seq_len: int``.** Surfaces the underlying
+  tokenizer's truncation cap. Downstream chunkers
+  (``kaos_content.chunking.EmbeddingChunker``) read this so chunks
+  don't silently truncate at embed time.
+- **``EmbeddingModel.count_tokens(texts) -> list[int]``.** Tokenizes
+  without running inference; returns per-text non-pad token count.
+- **Process-wide embedding cache (opt-in).** New setting
+  ``KaosNLPTransformersSettings.embedding_cache_size`` (default 0 =
+  off). When non-zero, an LRU keyed on
+  ``(model_id, revision, blake2b(text))`` short-circuits repeated
+  embedding requests. ~15 MB at 10K entries × 384-dim.
+- **``[gpu]`` and ``[openvino]`` extras** preserved as pyproject keys
+  for one release cycle. The 0.2.0a1 wheel is CPU-only; the 0.2.0a2
+  release introduces a ``kaos-nlp-transformers-gpu`` companion
+  package built with ``--features gpu`` (ort/cuda EP).
+- ``deny.toml`` for cargo-deny supply-chain checks (license
+  allowlist, advisory ignore list, multi-version warning).
+- ``tests/reference/*.npy`` — frozen reference embeddings for the
+  bit-equivalence regression test
+  (``tests/unit/test_reference_vectors.py``). Per-row cosine ≥
+  0.9999 vs the 0.1.0a6 fastembed output is the migration contract.
+
+### Deprecated
+
+- ``EmbeddingRetriever`` (text-only dense retriever). Use
+  ``kaos_content.indexing.SearchableDocument(retrieval="embeddings")``
+  for AST-grounded single-document retrieval, or the upcoming
+  ``kaos_content.indexing.SearchableCorpus`` for cross-document
+  retrieval. Both preserve ``block_ref`` / ``page`` / ``section_ref``
+  provenance. Removal scheduled for 0.3.0; emits ``DeprecationWarning``
+  in 0.2.0.
 
 ## [0.1.0a6] — 2026-05-08
 

@@ -51,15 +51,15 @@ dependencies = [
   "kaos-content>=0.1.0a1",
   "kaos-nlp-core>=0.1.0a1",
   "numpy>=2.1",
-  # Phase 1: fastembed stays in deps so the existing fastembed code
-  # path keeps working until Phase 4 (P4.6) drops it. The Rust cdylib
-  # is built and importable but no Python code calls it yet.
-  "fastembed>=0.6",
-  # huggingface_hub becomes an explicit base dep in 0.2.0 because
-  # the model2vec loader (and the future Rust loader) call
-  # snapshot_download directly. Today it's transitive via fastembed;
-  # making it explicit means dropping fastembed in P4.6 doesn't break
-  # model2vec.
+  # Audit KNT-601 (0.2.0): fastembed removed. Embedding inference now
+  # goes through the in-tree Rust cdylib (``_rust.embedding``) which
+  # calls libonnxruntime via the ``ort`` Rust crate. The cdylib is
+  # built by maturin from the Cargo.toml at the repo root; nothing in
+  # this list reflects it because it's bundled in the wheel itself.
+  #
+  # huggingface_hub stays an explicit base dep because the model2vec
+  # loader (the static-embedding code path) calls snapshot_download
+  # directly. Pre-KNT-601 it was transitive via fastembed.
   "huggingface_hub>=0.26",
 ]
 

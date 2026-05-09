@@ -41,11 +41,16 @@ class EmbeddingError(KaosNLPTransformersError):
 class BackendNotInstalledError(KaosNLPTransformersError):
     """Required backend is not installed.
 
-    Audit-06 KNT-501: post-torch-removal, this fires when fastembed
-    is missing (base install only — should be impossible) or when an
-    optional backend dep (``[model2vec]``, ``[gpu]`` for
-    ``onnxruntime-gpu``) is requested but unavailable. The message is
-    expected to carry an actionable install hint.
+    Audit KNT-601 (0.2.0): post-fastembed-removal, this fires when:
+    - The Rust cdylib (``_rust.abi3.so``) is missing — typically only
+      possible on a corrupted install or an editable-mode tree where
+      ``maturin develop`` was never run.
+    - The cdylib was not built with a feature flag the requested
+      device requires (e.g. ``cuda`` without ``--features gpu``;
+      install the ``kaos-nlp-transformers-gpu`` companion wheel).
+    - An optional Python backend dep (``[model2vec]``) is requested
+      but the extra was not installed.
+    The message is expected to carry an actionable install hint.
     """
 
 
@@ -53,12 +58,13 @@ class DeviceNotReachableError(KaosNLPTransformersError):
     """A requested accelerator is physically present but not reachable.
 
     Raised by ``device.resolve_device`` when the caller asks for e.g.
-    ``cuda:0`` on a host where nvidia-smi sees the card but no Python
-    binding is installed. Post-audit-06 KNT-501 the relevant binding is
-    ``onnxruntime-gpu`` (the ``[gpu]`` extra); the legacy
-    ``[torch]``-with-CUDA path was retired in 0.1.0a6. The
-    ``install_extra`` detail gives an MCP tool / agent the exact extra
-    to recommend — ``pip install kaos-nlp-transformers[{install_extra}]``.
+    ``cuda:0`` on a host where nvidia-smi sees the card but the
+    cdylib's CUDA EP isn't compiled in. Audit KNT-601 (0.2.0): the
+    relevant install hint is ``[gpu]`` which pulls the
+    ``kaos-nlp-transformers-gpu`` companion wheel built with
+    ``--features gpu``. The ``install_extra`` detail gives an MCP tool
+    / agent the exact extra to recommend —
+    ``pip install kaos-nlp-transformers[{install_extra}]``.
 
     Attributes:
         requested: The device string the caller asked for ('cuda', 'cuda:1', …).

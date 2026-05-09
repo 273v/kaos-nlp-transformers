@@ -44,20 +44,37 @@ class KaosNLPTransformersSettings(ModuleSettings):
     """Device for embedding inference.
 
     Values: 'auto' (detect best available), 'cpu', 'cuda', 'cuda:0',
-    'cuda:1', 'openvino'. Default 'auto' selects the best ONNX-Runtime
-    -reachable GPU if one is present (requires the ``[gpu]`` extra to
-    install ``onnxruntime-gpu``), otherwise CPU. Audit-06 KNT-501:
-    ``mps`` and ``xla`` were removed as valid values when the torch
-    backend was retired in 0.1.0a6.
+    'cuda:1', 'openvino'. Default 'auto' selects the best GPU if the
+    cdylib was built with the GPU feature flag (the
+    ``kaos-nlp-transformers-gpu`` companion wheel), otherwise CPU.
+    Audit history: ``mps``/``xla`` retired in KNT-501 (0.1.0a6).
     """
 
     backend: str = "auto"
     """Embedding backend preference.
 
-    Values: 'auto' (registry-driven), 'fastembed' (ONNX), 'model2vec'
-    (static numpy lookup). Default 'auto' lets the registry's
-    ``backend`` field decide. Audit-06 KNT-501: ``sentence-transformers``
-    was removed as a valid value when torch was dropped in 0.1.0a6.
+    Values: 'auto' (registry-driven), 'ort' (Rust + libonnxruntime),
+    'model2vec' (static numpy lookup). Default 'auto' lets the
+    registry's ``backend`` field decide. Audit history:
+    ``sentence-transformers`` retired in KNT-501 (0.1.0a6);
+    ``fastembed`` retired in KNT-601 (0.2.0).
+    """
+
+    embedding_cache_size: int = 0
+    """Process-wide LRU cache size (in entries) for the embedding
+    text → vector lookup. Default 0 = cache disabled.
+
+    When set non-zero, ``EmbeddingModel.embed()`` first checks an
+    in-process LRU keyed on ``(model_id, revision, blake3(text))`` for
+    each input string; cache hits skip the ort forward pass and reuse
+    the stored vector. A 10K-entry cache is roughly 10K * dim * 4 B
+    (~15 MB at dim=384), so 10000 is a reasonable upper bound for
+    most services.
+
+    The cache is process-local (not shared across workers); for a
+    long-running MCP server that re-embeds the same query strings
+    across requests this can save thousands of session.run() calls per
+    day. Audit KNT-601 (0.2.0) opt-in addition.
     """
 
     workspace_root: Path | None = None

@@ -39,7 +39,7 @@ openvino = ["ort/openvino"]
 # requires a re-release. Mirrors kaos-nlp-core/Cargo.toml.
 pyo3 = { version = "0.28", features = ["extension-module", "abi3-py313"] }
 numpy = "0.28"
-ndarray = "0.16"
+ndarray = "0.17"
 
 # ort: ONNX Runtime via Rust. KNT-601 §6.
 #  - download-binaries fetches Microsoft's manylinux2014 libonnxruntime.a

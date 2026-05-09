@@ -27,4 +27,16 @@ pub trait Backend: Send + Sync {
 
     /// Device this backend runs on (``"cpu"``, ``"cuda:0"``, …).
     fn device(&self) -> &str;
+
+    /// Maximum sequence length the backend's tokenizer applies as the
+    /// truncation cap. Consumers that chunk text before embedding (e.g.
+    /// ``kaos_content.chunking.EmbeddingChunker``) read this to size
+    /// their chunks so nothing is silently truncated.
+    fn max_seq_len(&self) -> usize;
+
+    /// Tokenize a batch of texts and return the per-text token count.
+    /// Does NOT run inference; just the tokenizer pass. Used by the
+    /// downstream chunker to decide whether a candidate chunk fits in
+    /// ``max_seq_len`` before materializing it for ``embed()``.
+    fn count_tokens(&self, texts: &[&str]) -> Result<Vec<usize>>;
 }

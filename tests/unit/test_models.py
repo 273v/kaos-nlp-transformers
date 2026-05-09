@@ -50,9 +50,11 @@ def test_every_registered_model_declares_a_dim():
 def test_every_registered_model_has_a_supported_backend():
     from kaos_nlp_transformers.models import REGISTRY
 
-    # audit-04 KNT-302: "model2vec" is the third valid backend, alongside
-    # fastembed (ONNX) and sentence-transformers (torch).
-    valid = {"fastembed", "sentence-transformers", "model2vec"}
+    # Audit history: KNT-501 (0.1.0a6) retired sentence-transformers;
+    # KNT-601 (0.2.0) retired fastembed. The surviving backends are
+    # ``"ort"`` (Rust + libonnxruntime) and ``"model2vec"`` (static
+    # numpy lookup).
+    valid = {"ort", "model2vec"}
     for model_id, entry in REGISTRY.items():
         assert entry.backend in valid, (
             f"{model_id} has backend={entry.backend!r}; must be one of {sorted(valid)}"

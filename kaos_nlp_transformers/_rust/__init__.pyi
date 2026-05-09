@@ -8,8 +8,7 @@ __version__`` even though the runtime artifact is a binary cdylib.
 
 __version__: str
 
-# Submodules are populated as the migration progresses (P3.1–P3.4).
-# At Phase 1 the stubs below are empty placeholders.
+# Submodules populated by the PyO3 cdylib (rust/lib.rs).
 from kaos_nlp_transformers._rust import embedding as embedding
 from kaos_nlp_transformers._rust import registry as registry
 from kaos_nlp_transformers._rust import reranker as reranker

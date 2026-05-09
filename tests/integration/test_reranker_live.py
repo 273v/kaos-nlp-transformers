@@ -1,13 +1,13 @@
 """Live integration tests for ``CrossEncoderReranker``.
 
-Hits a REAL ``fastembed.TextCrossEncoder`` (BAAI/bge-reranker-base) — no
-mocks. Audit-06 KNT-501 retired the sentence-transformers CrossEncoder
-entirely; this suite is the contract that proves the migration end-to-end.
+Hits a REAL Rust ``CrossEncoderBackend`` (ort + libonnxruntime,
+BAAI/bge-reranker-base) — no mocks. Audit KNT-601 (0.2.0) retired the
+fastembed Python wrapper entirely; this suite is the contract that
+proves the migration end-to-end.
 
-Skips when ``KAOS_NLP_TRANSFORMERS_OFFLINE=1`` or when fastembed is
-unavailable (which would already have failed the import gate; here we
-keep the skip so a hostile dev env can run the rest of the integration
-suite without failing collection).
+Skips when ``KAOS_NLP_TRANSFORMERS_OFFLINE=1`` or when the Rust
+extension hasn't been built (e.g., editable install without
+``maturin develop``).
 
 Marked ``@pytest.mark.integration`` and ``@pytest.mark.live`` (network).
 """
@@ -27,13 +27,19 @@ def _skip_if_offline() -> None:
         pytest.skip("offline mode set")
 
 
-def _skip_if_no_fastembed_rerank() -> None:
-    """fastembed is a hard dep, but the rerank submodule path is what's new
-    in audit-06. Guard against an old wheel that lacks it."""
+def _skip_if_no_rust_extension() -> None:
+    """Audit KNT-601 (0.2.0): cross-encoder reranking now goes through
+    the in-tree Rust cdylib. Guard against an editable install where
+    ``maturin develop`` was never run."""
     try:
-        from fastembed.rerank.cross_encoder import TextCrossEncoder  # noqa: F401
+        from kaos_nlp_transformers._rust.reranker import (  # noqa: F401
+            CrossEncoderBackend,
+        )
     except ImportError:
-        pytest.skip("fastembed.rerank.cross_encoder not available — install fastembed>=0.6")
+        pytest.skip(
+            "kaos_nlp_transformers._rust extension is not built — "
+            "run `uv run maturin develop --release` first."
+        )
 
 
 @pytest.fixture(scope="module")
@@ -44,7 +50,7 @@ def reranker():
     inflate suite runtime by tens of seconds.
     """
     _skip_if_offline()
-    _skip_if_no_fastembed_rerank()
+    _skip_if_no_rust_extension()
     from kaos_nlp_transformers import CrossEncoderReranker
 
     return CrossEncoderReranker.load()  # default = BAAI/bge-reranker-base
@@ -82,12 +88,14 @@ async def test_load_returns_real_reranker(reranker):
     assert reranker.model_id == "BAAI/bge-reranker-base"
 
 
-async def test_load_uses_fastembed_text_cross_encoder(reranker):
-    """Audit-06 KNT-501 contract: the underlying backend is fastembed's
-    TextCrossEncoder, not sentence-transformers' CrossEncoder."""
-    from fastembed.rerank.cross_encoder import TextCrossEncoder
+async def test_load_uses_rust_cross_encoder(reranker):
+    """Audit KNT-601 (0.2.0) contract: the underlying backend is the
+    in-tree Rust ``CrossEncoderBackend`` (ort + libonnxruntime), not
+    fastembed's TextCrossEncoder. Audit history: KNT-501 (0.1.0a6)
+    retired sentence-transformers' CrossEncoder."""
+    from kaos_nlp_transformers._rust.reranker import CrossEncoderBackend
 
-    assert isinstance(reranker._backend, TextCrossEncoder)
+    assert isinstance(reranker._backend, CrossEncoderBackend)
 
 
 # -- Rerank contract -------------------------------------------------------

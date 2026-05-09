@@ -43,24 +43,24 @@ def test_settings_backend_from_env(monkeypatch):
 
 
 def _cpu() -> DeviceInfo:
-    return DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+    return DeviceInfo(name="CPU", device="cpu", backend="ort")
 
 
 def _gpu() -> DeviceInfo:
     # Post-audit-06: GPU device recommends fastembed too (onnxruntime-gpu
     # via CUDAExecutionProvider). The old "GPU → sentence-transformers"
     # branch was retired with the torch backend.
-    return DeviceInfo(name="GPU", device="cuda:0", backend="fastembed")
+    return DeviceInfo(name="GPU", device="cuda:0", backend="ort")
 
 
-def test_resolve_backend_explicit_fastembed():
-    assert _resolve_backend("fastembed", _gpu(), "fastembed") == "fastembed"
+def test_resolve_backend_explicit_ort():
+    assert _resolve_backend("ort", _gpu(), "ort") == "ort"
 
 
 def test_resolve_backend_auto_cpu_uses_registry():
     """auto → registry decides. Post-audit-06 the registry choices are
     fastembed and model2vec; sentence-transformers was retired."""
-    assert _resolve_backend("auto", _cpu(), "fastembed") == "fastembed"
+    assert _resolve_backend("auto", _cpu(), "ort") == "ort"
     assert _resolve_backend("auto", _cpu(), "model2vec") == "model2vec"
 
 
@@ -69,7 +69,7 @@ def test_resolve_backend_auto_gpu_stays_on_registry():
     fastembed handles GPU via onnxruntime-gpu providers, so a GPU device
     no longer flips the registry's choice — it just stays on fastembed
     (the registry default for GPU-capable models)."""
-    assert _resolve_backend("auto", _gpu(), "fastembed") == "fastembed"
+    assert _resolve_backend("auto", _gpu(), "ort") == "ort"
     # And model2vec stays on model2vec even on a GPU device — static
     # models have no GPU codepath; we honor the registry.
     assert _resolve_backend("auto", _gpu(), "model2vec") == "model2vec"
@@ -79,11 +79,11 @@ def test_resolve_backend_auto_gpu_stays_on_registry():
 
 
 def test_resolve_backend_explicit_model2vec():
-    assert _resolve_backend("model2vec", _cpu(), "fastembed") == "model2vec"
+    assert _resolve_backend("model2vec", _cpu(), "ort") == "model2vec"
     # An explicit "model2vec" wins even on a GPU device — static models
     # have no GPU codepath, so honoring the user's choice (and pinning
     # CPU at load time) is the right behavior.
-    assert _resolve_backend("model2vec", _gpu(), "fastembed") == "model2vec"
+    assert _resolve_backend("model2vec", _gpu(), "ort") == "model2vec"
 
 
 def test_resolve_backend_auto_routes_static_model_to_model2vec():
@@ -101,7 +101,7 @@ def test_resolve_backend_rejects_unknown_value():
     through. Audit-04 update keeps the same shape but mentions model2vec
     in the install hint."""
     with pytest.raises(ValueError, match="Invalid backend"):
-        _resolve_backend("tensorflow", _cpu(), "fastembed")
+        _resolve_backend("tensorflow", _cpu(), "ort")
 
 
 def test_load_model2vec_cached_missing_dep_raises_friendly_error(monkeypatch):

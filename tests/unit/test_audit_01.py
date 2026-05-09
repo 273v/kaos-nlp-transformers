@@ -89,11 +89,11 @@ def test_loader_signatures_accept_revision():
     import inspect
 
     from kaos_nlp_transformers.embedding import (
-        _load_fastembed_cached,
         _load_model2vec_cached,
+        _load_rust_embedding_cached,
     )
 
-    fe_params = inspect.signature(_load_fastembed_cached).parameters
+    fe_params = inspect.signature(_load_rust_embedding_cached).parameters
     m2v_params = inspect.signature(_load_model2vec_cached).parameters
     assert "revision" in fe_params, (
         "fastembed loader must accept revision (cache-key participant) per audit-01 KNT-003."
@@ -176,10 +176,10 @@ def test_offline_setting_sets_hf_env_vars(monkeypatch):
         raise RuntimeError(msg)
 
     # Audit-06 KNT-501: only fastembed + model2vec backends remain, so we
-    # only need to stub _load_fastembed_cached here. The previous
+    # only need to stub _load_rust_embedding_cached here. The previous
     # _load_sentence_transformers_cached stub was retired with the SE
     # backend.
-    monkeypatch.setattr(embedding_mod, "_load_fastembed_cached", _capture_then_explode)
+    monkeypatch.setattr(embedding_mod, "_load_rust_embedding_cached", _capture_then_explode)
 
     s = KaosNLPTransformersSettings(offline=True)
     with pytest.raises(RuntimeError, match="stub backend"):

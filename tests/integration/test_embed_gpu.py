@@ -17,18 +17,20 @@ pytestmark = pytest.mark.integration
 
 
 def _has_cuda_provider() -> bool:
-    """True iff onnxruntime + a working CUDAExecutionProvider are installed.
+    """True iff the cdylib was built with the GPU feature flag.
 
-    Checking ``get_available_providers`` is more accurate than checking
-    ``import onnxruntime_gpu`` because the gpu wheel installs as
-    ``onnxruntime`` with the CUDA provider added; there is no
-    ``onnxruntime_gpu`` import name.
+    Audit KNT-601 (0.2.0): replaces the legacy ``onnxruntime``
+    ``get_available_providers`` probe. The cdylib's
+    ``capabilities()`` reports ``cuda=True`` only when the wheel was
+    built with ``--features gpu`` (i.e., the ``kaos-nlp-transformers-gpu``
+    companion wheel is installed). The 0.2.0a1 base wheel always
+    reports ``cuda=False``.
     """
     try:
-        import onnxruntime as ort
+        from kaos_nlp_transformers._rust.registry import capabilities
     except ImportError:
         return False
-    return "CUDAExecutionProvider" in ort.get_available_providers()
+    return bool(capabilities().get("cuda", False))
 
 
 def _has_nvidia_gpu() -> bool:

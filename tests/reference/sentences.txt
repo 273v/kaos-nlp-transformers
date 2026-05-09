@@ -1,0 +1,16 @@
+The quick brown fox jumps over the lazy dog.
+Knowledge is power.
+Better late than never.
+Practice makes perfect.
+The plaintiff alleges the defendant breached the contract.
+This Agreement shall be governed by the laws of Delaware.
+The court finds the evidence sufficient to establish liability.
+Federal Rule of Civil Procedure 12(b)(6) permits a motion to dismiss.
+Sentence embedding models map text to fixed-dimensional dense vectors.
+Cosine similarity is invariant to vector magnitude.
+Mean pooling weighted by the attention mask is the standard sentence-transformer pooling.
+Multi-head self-attention learns different relational patterns per head.
+Today's lunch was a sandwich and a cup of coffee.
+The package will arrive tomorrow between 10 AM and 2 PM.
+Server response times spiked at 14:32 UTC.
+Remember to bring an umbrella tomorrow; the forecast says heavy rain.

@@ -26,17 +26,15 @@ pytestmark = pytest.mark.unit
 
 
 def test_device_info_fields():
-    d = DeviceInfo(
-        name="Test GPU", device="cuda:0", backend="sentence-transformers", memory_mb=16000
-    )
+    d = DeviceInfo(name="Test GPU", device="cuda:0", backend="ort", memory_mb=16000)
     assert d.name == "Test GPU"
     assert d.device == "cuda:0"
-    assert d.backend == "sentence-transformers"
+    assert d.backend == "ort"
     assert d.memory_mb == 16000
 
 
 def test_device_info_defaults():
-    d = DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+    d = DeviceInfo(name="CPU", device="cpu", backend="ort")
     assert d.memory_mb == 0
 
 
@@ -44,8 +42,8 @@ def test_device_info_defaults():
 
 
 def test_system_devices_best_returns_first():
-    gpu = DeviceInfo(name="GPU", device="cuda:0", backend="sentence-transformers", memory_mb=8000)
-    cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+    gpu = DeviceInfo(name="GPU", device="cuda:0", backend="ort", memory_mb=8000)
+    cpu = DeviceInfo(name="CPU", device="cpu", backend="ort")
     sys = SystemDevices(devices=(gpu, cpu))
     assert sys.best == gpu
 
@@ -53,31 +51,29 @@ def test_system_devices_best_returns_first():
 def test_system_devices_best_fallback_cpu():
     sys = SystemDevices(devices=())
     assert sys.best.device == "cpu"
-    assert sys.best.backend == "fastembed"
+    assert sys.best.backend == "ort"
 
 
 def test_system_devices_has_gpu():
-    gpu = DeviceInfo(name="GPU", device="cuda:0", backend="sentence-transformers", memory_mb=8000)
-    cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+    gpu = DeviceInfo(name="GPU", device="cuda:0", backend="ort", memory_mb=8000)
+    cpu = DeviceInfo(name="CPU", device="cpu", backend="ort")
     assert SystemDevices(devices=(gpu, cpu)).has_gpu is True
     assert SystemDevices(devices=(cpu,)).has_gpu is False
     assert SystemDevices(devices=()).has_gpu is False
 
 
 def test_system_devices_gpu_devices():
-    gpu0 = DeviceInfo(
-        name="GPU0", device="cuda:0", backend="sentence-transformers", memory_mb=16000
-    )
-    gpu1 = DeviceInfo(name="GPU1", device="cuda:1", backend="sentence-transformers", memory_mb=8000)
-    cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+    gpu0 = DeviceInfo(name="GPU0", device="cuda:0", backend="ort", memory_mb=16000)
+    gpu1 = DeviceInfo(name="GPU1", device="cuda:1", backend="ort", memory_mb=8000)
+    cpu = DeviceInfo(name="CPU", device="cpu", backend="ort")
     sys = SystemDevices(devices=(gpu0, gpu1, cpu))
     assert len(sys.gpu_devices) == 2
     assert sys.gpu_devices[0] == gpu0
 
 
 def test_system_devices_cpu_device():
-    gpu = DeviceInfo(name="GPU", device="cuda:0", backend="sentence-transformers")
-    cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+    gpu = DeviceInfo(name="GPU", device="cuda:0", backend="ort")
+    cpu = DeviceInfo(name="CPU", device="cpu", backend="ort")
     sys = SystemDevices(devices=(gpu, cpu))
     assert sys.cpu_device == cpu
 
@@ -88,7 +84,7 @@ def test_system_devices_cpu_device_fallback():
 
 
 def test_system_devices_has_latent_gpu():
-    cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed")
+    cpu = DeviceInfo(name="CPU", device="cpu", backend="ort")
     latent = LatentDevice(name="GPU", kind="cuda", reason="r", install_extra="torch")
     assert SystemDevices(devices=(cpu,), latent_devices=(latent,)).has_latent_gpu is True
     assert SystemDevices(devices=(cpu,)).has_latent_gpu is False
@@ -206,7 +202,9 @@ def test_reconcile_no_torch_two_nvidia_gpus(monkeypatch):
         LatentDevice(name="GPU1", kind="cuda", reason="x", install_extra="torch"),
     ]
     _stub_probes(monkeypatch, nvidia=cand)
-    out = _detect_latent_devices(reachable=[], onnx_providers=["CPUExecutionProvider"])
+    out = _detect_latent_devices(
+        reachable=[], rust_capabilities={"cpu": True, "cuda": False, "openvino": False}
+    )
     assert [d.name for d in out] == ["GPU0", "GPU1"]
 
 
@@ -218,10 +216,12 @@ def test_reconcile_torch_sees_both_no_latents(monkeypatch):
     ]
     _stub_probes(monkeypatch, nvidia=cand)
     reachable = [
-        DeviceInfo(name="GPU0", device="cuda:0", backend="sentence-transformers", memory_mb=16000),
-        DeviceInfo(name="GPU1", device="cuda:1", backend="sentence-transformers", memory_mb=16000),
+        DeviceInfo(name="GPU0", device="cuda:0", backend="ort", memory_mb=16000),
+        DeviceInfo(name="GPU1", device="cuda:1", backend="ort", memory_mb=16000),
     ]
-    out = _detect_latent_devices(reachable=reachable, onnx_providers=[])
+    out = _detect_latent_devices(
+        reachable=reachable, rust_capabilities={"cpu": True, "cuda": False, "openvino": False}
+    )
     assert out == []
 
 
@@ -231,7 +231,7 @@ def test_reconcile_onnx_cuda_provider_suppresses_latents(monkeypatch):
     _stub_probes(monkeypatch, nvidia=cand)
     out = _detect_latent_devices(
         reachable=[],
-        onnx_providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        rust_capabilities={"cpu": True, "cuda": True, "openvino": False},
     )
     assert out == []
 
@@ -239,14 +239,21 @@ def test_reconcile_onnx_cuda_provider_suppresses_latents(monkeypatch):
 def test_reconcile_apple_no_torch_yields_latent(monkeypatch):
     cand = [LatentDevice(name="Apple MPS", kind="mps", reason="x", install_extra="torch")]
     _stub_probes(monkeypatch, apple=cand)
-    out = _detect_latent_devices(reachable=[], onnx_providers=[])
+    out = _detect_latent_devices(
+        reachable=[], rust_capabilities={"cpu": True, "cuda": False, "openvino": False}
+    )
     assert len(out) == 1
     assert out[0].kind == "mps"
 
 
 def test_reconcile_no_probes_no_latents(monkeypatch):
     _stub_probes(monkeypatch)  # all empty
-    assert _detect_latent_devices(reachable=[], onnx_providers=[]) == []
+    assert (
+        _detect_latent_devices(
+            reachable=[], rust_capabilities={"cpu": True, "cuda": False, "openvino": False}
+        )
+        == []
+    )
 
 
 # -- detect_devices (top-level + logging) ----------------------------------
@@ -290,7 +297,10 @@ def test_detect_devices_warns_when_only_latent(monkeypatch, kaos_caplog):
     """
     cand = [LatentDevice(name="NV GPU", kind="cuda", reason="r", install_extra="gpu")]
     monkeypatch.setattr("kaos_nlp_transformers.device._detect_reachable_gpus", lambda _p: [])
-    monkeypatch.setattr("kaos_nlp_transformers.device._detect_onnx_providers", lambda: [])
+    monkeypatch.setattr(
+        "kaos_nlp_transformers.device._detect_rust_capabilities",
+        lambda: {"cpu": True, "cuda": False, "openvino": False, "build_features": []},
+    )
     _stub_probes(monkeypatch, nvidia=cand)
     _reset_cache_for_tests()
 
@@ -306,11 +316,11 @@ def test_detect_devices_no_warning_when_gpu_reachable(monkeypatch, kaos_caplog):
     """Regression guard: existing GPU-reachable path stays at INFO, not WARNING."""
     monkeypatch.setattr(
         "kaos_nlp_transformers.device._detect_reachable_gpus",
-        lambda _p: [DeviceInfo(name="GPU", device="cuda:0", backend="fastembed", memory_mb=16000)],
+        lambda _p: [DeviceInfo(name="GPU", device="cuda:0", backend="ort", memory_mb=16000)],
     )
     monkeypatch.setattr(
-        "kaos_nlp_transformers.device._detect_onnx_providers",
-        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        "kaos_nlp_transformers.device._detect_rust_capabilities",
+        lambda: {"cpu": True, "cuda": True, "openvino": False, "build_features": ["gpu"]},
     )
     _stub_probes(monkeypatch)
     _reset_cache_for_tests()
@@ -323,7 +333,10 @@ def test_detect_devices_no_warning_when_gpu_reachable(monkeypatch, kaos_caplog):
 
 def test_detect_devices_no_warning_when_clean_cpu_box(monkeypatch, kaos_caplog):
     monkeypatch.setattr("kaos_nlp_transformers.device._detect_reachable_gpus", lambda _p: [])
-    monkeypatch.setattr("kaos_nlp_transformers.device._detect_onnx_providers", lambda: [])
+    monkeypatch.setattr(
+        "kaos_nlp_transformers.device._detect_rust_capabilities",
+        lambda: {"cpu": True, "cuda": False, "openvino": False, "build_features": []},
+    )
     _stub_probes(monkeypatch)  # nothing latent either
     _reset_cache_for_tests()
 
@@ -341,13 +354,9 @@ def test_detect_devices_no_warning_when_clean_cpu_box(monkeypatch, kaos_caplog):
 def _make_system() -> SystemDevices:
     return SystemDevices(
         devices=(
-            DeviceInfo(
-                name="Big GPU", device="cuda:0", backend="sentence-transformers", memory_mb=16000
-            ),
-            DeviceInfo(
-                name="Small GPU", device="cuda:1", backend="sentence-transformers", memory_mb=8000
-            ),
-            DeviceInfo(name="CPU", device="cpu", backend="fastembed"),
+            DeviceInfo(name="Big GPU", device="cuda:0", backend="ort", memory_mb=16000),
+            DeviceInfo(name="Small GPU", device="cuda:1", backend="ort", memory_mb=8000),
+            DeviceInfo(name="CPU", device="cpu", backend="ort"),
         ),
         onnx_providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
     )
@@ -380,7 +389,7 @@ def test_resolve_cuda_indexed():
 
 def test_resolve_unavailable_raises():
     """No latent of this kind → plain ValueError."""
-    sys = SystemDevices(devices=(DeviceInfo(name="CPU", device="cpu", backend="fastembed"),))
+    sys = SystemDevices(devices=(DeviceInfo(name="CPU", device="cpu", backend="ort"),))
     with pytest.raises(ValueError, match="not available"):
         resolve_device("cuda:0", sys)
 
@@ -388,7 +397,7 @@ def test_resolve_unavailable_raises():
 def test_resolve_cuda_unreachable_raises_typed_error():
     """Latent GPU present + cuda requested → DeviceNotReachableError with install_extra."""
     sys = SystemDevices(
-        devices=(DeviceInfo(name="CPU", device="cpu", backend="fastembed"),),
+        devices=(DeviceInfo(name="CPU", device="cpu", backend="ort"),),
         latent_devices=(
             LatentDevice(
                 name="NVIDIA RTX 5070 Ti",
@@ -412,7 +421,7 @@ def test_resolve_cuda_unreachable_raises_typed_error():
 
 def test_resolve_mps_unreachable_raises_typed_error():
     sys = SystemDevices(
-        devices=(DeviceInfo(name="CPU", device="cpu", backend="fastembed"),),
+        devices=(DeviceInfo(name="CPU", device="cpu", backend="ort"),),
         latent_devices=(
             LatentDevice(
                 name="Apple MPS",
@@ -429,17 +438,17 @@ def test_resolve_mps_unreachable_raises_typed_error():
 
 def test_resolve_openvino_available():
     sys = SystemDevices(
-        devices=(DeviceInfo(name="CPU", device="cpu", backend="fastembed"),),
+        devices=(DeviceInfo(name="CPU", device="cpu", backend="ort"),),
         onnx_providers=("OpenVINOExecutionProvider", "CPUExecutionProvider"),
     )
     d = resolve_device("openvino", sys)
     assert d.device == "openvino"
-    assert d.backend == "fastembed"
+    assert d.backend == "ort"
 
 
 def test_resolve_openvino_unavailable():
     sys = SystemDevices(
-        devices=(DeviceInfo(name="CPU", device="cpu", backend="fastembed"),),
+        devices=(DeviceInfo(name="CPU", device="cpu", backend="ort"),),
         onnx_providers=("CPUExecutionProvider",),
     )
     with pytest.raises(ValueError, match="OpenVINO"):
@@ -450,12 +459,14 @@ def test_resolve_openvino_unavailable():
 
 
 def test_detect_devices_onnx_providers():
+    """``SystemDevices.onnx_providers`` is preserved post-KNT-601 as a
+    synthetic list derived from the cdylib's compile-time capability
+    flags (CPUExecutionProvider always; CUDA/OpenVINO if their
+    respective cargo features were on at build time).
+    """
     sys = detect_devices()
     assert isinstance(sys.onnx_providers, tuple)
-    # CPUExecutionProvider should always be there if onnxruntime is installed
-    try:
-        import onnxruntime as _ort  # noqa: F401
-
-        assert "CPUExecutionProvider" in sys.onnx_providers
-    except ImportError:
-        pass
+    # Audit KNT-601: CPUExecutionProvider is always synthesized, even
+    # in the CPU-only base wheel. The Python ``onnxruntime`` package
+    # is no longer in our dep tree.
+    assert "CPUExecutionProvider" in sys.onnx_providers

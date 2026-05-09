@@ -288,6 +288,32 @@ impl Backend for OrtBackend {
     fn device(&self) -> &str {
         &self.device_str
     }
+
+    fn max_seq_len(&self) -> usize {
+        self.tokenizer.max_seq_len
+    }
+
+    fn count_tokens(&self, texts: &[&str]) -> Result<Vec<usize>> {
+        // The encode_batch path applies the model's standard padding +
+        // truncation; counts include [CLS] and [SEP]. Pre-truncation
+        // counts (i.e. how many tokens the input WOULD have been
+        // without the cap) are not exposed by the tokenizers crate's
+        // fast path; if a chunker wants pre-truncation counts it
+        // should bypass max_seq_len at the tokenizer level. For our
+        // chunker use case, post-truncation count is what we want
+        // (it tells you "this chunk fits in N tokens").
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let encoded = self.tokenizer.encode_batch(texts)?;
+        // Count NON-PAD tokens per row by summing attention_mask.
+        let counts: Vec<usize> = encoded
+            .attention_mask
+            .iter()
+            .map(|mask| mask.iter().filter(|&&v| v != 0).count())
+            .collect();
+        Ok(counts)
+    }
 }
 
 // Suppress unused-warning for Array3 (only used in the ArrayView3 path).

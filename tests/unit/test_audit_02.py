@@ -23,17 +23,20 @@ pytestmark = pytest.mark.unit
 
 
 class _FakeBackend:
-    """Stand-in for fastembed/sentence-transformers that returns vectors with
-    arbitrary magnitudes — lets us prove the model normalizes regardless of
-    backend output."""
+    """Stand-in for ``_rust.embedding.PyEmbeddingBackend`` that returns
+    vectors with arbitrary magnitudes — lets us prove the model
+    normalizes regardless of backend output. Audit KNT-601: matches the
+    Rust backend's ``embed(texts, batch_size) -> np.ndarray`` contract."""
 
     def __init__(self, vecs: np.ndarray) -> None:
         self._vecs = vecs
 
     def embed(self, texts: list[str], batch_size: int = 32):
-        return iter(self._vecs)
+        # Rust path returns a (N, dim) numpy array directly.
+        return self._vecs
 
     def encode(self, texts: list[str], **kwargs):
+        # model2vec path. Same vectors.
         return self._vecs
 
 
@@ -54,11 +57,11 @@ def _make_embedding_model_with_fake(arr: np.ndarray):
         license="MIT",
         params_m=0,
         dim=int(arr.shape[1]),
-        backend="fastembed",
+        backend="ort",
         notes="test fixture",
     )
-    device = DeviceInfo(name="CPU", device="cpu", backend="fastembed", memory_mb=0)
-    return EmbeddingModel(registered, backend, device=device, backend_name="fastembed")
+    device = DeviceInfo(name="CPU", device="cpu", backend="ort", memory_mb=0)
+    return EmbeddingModel(registered, backend, device=device, backend_name="ort")
 
 
 def test_embed_returns_unit_norm_rows_for_arbitrary_backend_output():
@@ -93,11 +96,11 @@ def test_embed_handles_zero_vector_without_nan():
         license="MIT",
         params_m=0,
         dim=3,
-        backend="fastembed",
+        backend="ort",
         notes="test fixture",
     )
-    device = DeviceInfo(name="CPU", device="cpu", backend="fastembed", memory_mb=0)
-    model = EmbeddingModel(registered, _FakeBackend(raw), device=device, backend_name="fastembed")
+    device = DeviceInfo(name="CPU", device="cpu", backend="ort", memory_mb=0)
+    model = EmbeddingModel(registered, _FakeBackend(raw), device=device, backend_name="ort")
 
     out = model.embed(["zero", "unit"])
     assert not np.isnan(out).any()
@@ -281,7 +284,7 @@ def test_consecutive_offline_loads_dont_leak(monkeypatch):
         raise RuntimeError(msg)
 
     # Audit-06 KNT-501: SE loader retired; only fastembed needs stubbing.
-    monkeypatch.setattr(embedding_mod, "_load_fastembed_cached", _capture_then_explode)
+    monkeypatch.setattr(embedding_mod, "_load_rust_embedding_cached", _capture_then_explode)
 
     s_on = KaosNLPTransformersSettings(offline=True)
     s_off = KaosNLPTransformersSettings(offline=False)
@@ -522,25 +525,32 @@ def test_resolve_backend_rejects_unknown_backend():
     from kaos_nlp_transformers.device import DeviceInfo
     from kaos_nlp_transformers.embedding import _resolve_backend
 
-    cpu = DeviceInfo(name="CPU", device="cpu", backend="fastembed", memory_mb=0)
+    cpu = DeviceInfo(name="CPU", device="cpu", backend="ort", memory_mb=0)
 
-    # Valid values still work. Audit-06 KNT-501: ``sentence-transformers`` was
-    # retired alongside the torch backend; the surviving valid set is
-    # {"auto", "fastembed", "model2vec"}.
-    assert _resolve_backend("fastembed", cpu, "fastembed") == "fastembed"
-    assert _resolve_backend("auto", cpu, "fastembed") == "fastembed"
-    assert _resolve_backend("model2vec", cpu, "fastembed") == "model2vec"
+    # Valid values. Audit KNT-601 (0.2.0): the surviving valid set is
+    # {"auto", "ort", "model2vec"}; ``"fastembed"`` and
+    # ``"sentence-transformers"`` are retired and raise with a
+    # migration message.
+    assert _resolve_backend("ort", cpu, "ort") == "ort"
+    assert _resolve_backend("auto", cpu, "ort") == "ort"
+    assert _resolve_backend("model2vec", cpu, "ort") == "model2vec"
 
     # Unknown values raise.
     with pytest.raises(ValueError, match=r"Invalid backend"):
-        _resolve_backend("tensorflow", cpu, "fastembed")
+        _resolve_backend("tensorflow", cpu, "ort")
     with pytest.raises(ValueError, match=r"Invalid backend"):
-        _resolve_backend("", cpu, "fastembed")
+        _resolve_backend("", cpu, "ort")
     with pytest.raises(ValueError, match=r"Invalid backend"):
-        _resolve_backend("FastEmbed", cpu, "fastembed")  # case-sensitive
-    # Audit-06 KNT-501 regression guard: SE name is now invalid.
+        _resolve_backend("ORT", cpu, "ort")  # case-sensitive
+
+    # Audit KNT-501 regression: sentence-transformers stays invalid,
+    # carries a retired-backend message.
     with pytest.raises(ValueError, match=r"Invalid backend"):
-        _resolve_backend("sentence-transformers", cpu, "fastembed")
+        _resolve_backend("sentence-transformers", cpu, "ort")
+    # Audit KNT-601 regression: fastembed is now retired with its own
+    # migration message.
+    with pytest.raises(ValueError, match=r"Invalid backend.*retired|fastembed Python wrapper"):
+        _resolve_backend("fastembed", cpu, "ort")
 
 
 # -----------------------------------------------------------------------------

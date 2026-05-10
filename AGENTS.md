@@ -28,11 +28,14 @@ public `kaos-nlp-transformers` repository. The PyPI distribution is
   ecosystem dependencies (ort, tokenizers, hf-hub, pyo3, ndarray, ...) live
   in `Cargo.toml` and are bundled inside the cdylib at wheel-build time.
 - Optional integrations belong behind extras and lazy imports. Current
-  extras include `clustering`, `model2vec`, and `mcp`. The `gpu` and
-  `openvino` extras are reserved-and-no-op aliases today; GPU acceleration
-  ships as a separate `kaos-nlp-transformers-gpu` companion wheel built
-  with `cargo build --features gpu` (ort/cuda EP). The `torch` extra is a
-  deprecated no-op alias scheduled for removal in 0.3.0.
+  extras include `model2vec` and `mcp`. The `gpu` and `openvino` extras
+  are reserved-and-no-op aliases today; GPU acceleration ships as a
+  separate `kaos-nlp-transformers-gpu` companion wheel built with
+  `cargo build --features gpu` (ort/cuda EP). The `torch` extra is a
+  deprecated no-op alias scheduled for removal in 0.3.0. KNT-602 Option
+  A (0.2.0a3) retired the previous `clustering` extra (scipy +
+  ``SemanticDedupLevel``) — those moved to ``kaos-content[clustering]``
+  alongside the level implementation.
 
 ## Local References
 
@@ -152,7 +155,7 @@ Use the repository docs that already exist:
 Base setup (always run after a fresh clone or after Cargo.toml changes):
 
 ```bash
-uv sync --group dev --extra clustering --extra model2vec
+uv sync --group dev --extra model2vec
 uv run maturin develop --release
 uvx pre-commit install
 ```
@@ -198,7 +201,7 @@ or examples are changed, run the normal quality gate too.
 For optional surfaces, install the relevant extras and keep tests opt-in:
 
 ```bash
-uv sync --group dev --extra clustering --extra model2vec --extra mcp
+uv sync --group dev --extra model2vec --extra mcp
 ```
 
 The `[gpu]` and `[openvino]` extras are reserved aliases (no-op today;

@@ -49,8 +49,8 @@ jobs:
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies (clustering + model2vec extras so ty resolves both)
-        run: uv sync --group dev --extra clustering --extra model2vec --python 3.13
+      - name: Install dependencies (model2vec extra so ty resolves it)
+        run: uv sync --group dev --extra model2vec --python 3.13
 
       - name: Verify Cargo.toml version matches tag
         id: version

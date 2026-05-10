@@ -36,7 +36,9 @@ def _get_info_tool(runtime: KaosRuntime) -> KaosTool:
 def test_register_transformers_tools_returns_count():
     runtime = _make_runtime()
     n = register_transformers_tools(runtime)
-    assert n == 5
+    # KNT-602 (0.2.0a3): dedup-semantic moved to kaos-content; this
+    # package now registers info / embed / retrieve / rerank only.
+    assert n == 4
 
 
 def test_register_transformers_tools_names():
@@ -47,9 +49,10 @@ def test_register_transformers_tools_names():
         "kaos-nlp-transformers-embed",
         "kaos-nlp-transformers-retrieve",
         "kaos-nlp-transformers-rerank",
-        "kaos-nlp-transformers-dedup-semantic",
     }
     assert expected.issubset(set(runtime.tools.list_tools()))
+    # The old dedup-semantic tool was removed; KNT-602 boundary fix.
+    assert "kaos-nlp-transformers-dedup-semantic" not in runtime.tools.list_tools()
 
 
 def _get_tool(runtime: KaosRuntime, name: str) -> KaosTool:
@@ -327,82 +330,9 @@ def test_rerank_tool_rejects_empty_candidates():
     assert "non-empty array" in result.require_text()
 
 
-# -- dedup-semantic --------------------------------------------------------
-
-
-def test_dedup_tool_requires_two_documents():
-    runtime = _make_runtime()
-    register_transformers_tools(runtime)
-    tool = _get_tool(runtime, "kaos-nlp-transformers-dedup-semantic")
-
-    result = asyncio.run(
-        tool.execute(
-            {"documents": [{"doc_id": "a", "text": "x"}]},
-            None,
-        )
-    )
-    assert result.isError is True
-    assert "at least 2 entries" in result.require_text()
-
-
-def test_dedup_tool_rejects_non_string_doc_id():
-    runtime = _make_runtime()
-    register_transformers_tools(runtime)
-    tool = _get_tool(runtime, "kaos-nlp-transformers-dedup-semantic")
-
-    result = asyncio.run(
-        tool.execute(
-            {
-                "documents": [
-                    {"doc_id": 1, "text": "x"},
-                    {"doc_id": 2, "text": "y"},
-                ]
-            },
-            None,
-        )
-    )
-    assert result.isError is True
-    assert "string `doc_id` and `text`" in result.require_text()
-
-
-@pytest.mark.live
-def test_dedup_tool_happy_path():
-    """Live test — needs scipy + fastembed model. Gated on `live` marker."""
-    pytest.importorskip("scipy")
-    runtime = _make_runtime()
-    register_transformers_tools(runtime)
-    tool = _get_tool(runtime, "kaos-nlp-transformers-dedup-semantic")
-
-    result = asyncio.run(
-        tool.execute(
-            {
-                "documents": [
-                    {"doc_id": "a", "text": "Force majeure clauses excuse performance."},
-                    {"doc_id": "b", "text": "Force majeure provisions excuse performance."},
-                    {"doc_id": "c", "text": "Indemnity caps the liability of the seller."},
-                ],
-                "distance_threshold": 0.15,
-            },
-            None,
-        )
-    )
-    assert result.isError is False, result.require_text()
-    payload = result.structuredContent
-    assert payload is not None
-    # The two near-duplicates should land in the same cluster, the third alone.
-    assert len(payload["clusters"]) == 1
-    cluster = payload["clusters"][0]
-    assert set(cluster["member_doc_ids"]) == {"a", "b"}
-    assert 0.0 <= cluster["similarity"] <= 1.0
-
-
-def test_dedup_tool_rejects_oversized_input(monkeypatch):
-    monkeypatch.setattr("kaos_nlp_transformers.tools._MAX_DEDUP_DOCS", 3)
-    runtime = _make_runtime()
-    register_transformers_tools(runtime)
-    tool = _get_tool(runtime, "kaos-nlp-transformers-dedup-semantic")
-
-    docs = [{"doc_id": str(i), "text": "x"} for i in range(4)]
-    result = asyncio.run(tool.execute({"documents": docs}, None))
-    assert result.isError is True
-    assert "Too many documents" in result.require_text()
+# NOTE: dedup-semantic tool tests moved to kaos-content with the
+# implementation (KNT-602 Option A, kaos-content 0.1.0a3). See
+# kaos-content/tests/unit/test_tools.py::TestDedupSemanticTool for
+# the equivalent coverage of the renamed `kaos-content-dedup-semantic`
+# tool. tests/unit/test_audit_07.py pins the regression that the
+# old tool name and clustering submodule stay removed.

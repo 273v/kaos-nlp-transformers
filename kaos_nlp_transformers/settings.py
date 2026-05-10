@@ -24,11 +24,14 @@ class KaosNLPTransformersSettings(ModuleSettings):
     consumer that does not pass an explicit ``model_id``. Must be present
     in ``REGISTRY`` (or ``allow_unregistered`` must be true).
 
-    The whole package now derives its embedding-model default from this
-    field — ``SemanticDedupLevel.__init__`` and the worker MCP tools pull
+    The whole package derives its embedding-model default from this
+    field — the worker MCP tools pull
     ``model_fields["default_model"].default`` so a single environment
-    override (``KAOS_NLP_TRANSFORMERS_DEFAULT_MODEL``) updates every call
-    site that does not pass an explicit override."""
+    override (``KAOS_NLP_TRANSFORMERS_DEFAULT_MODEL``) updates every
+    call site that does not pass an explicit override.
+    ``kaos_content.dedup.levels.semantic.SemanticDedupLevel`` (KNT-602
+    0.2.0a3 → kaos-content 0.1.0a3+) reads the same field at run
+    time."""
 
     default_reranker_model: str = "BAAI/bge-reranker-base"
     """Default cross-encoder reranker loaded by

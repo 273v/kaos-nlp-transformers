@@ -50,13 +50,13 @@ jobs:
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies (clustering + model2vec extras so ty resolves both)
+      - name: Install dependencies (model2vec extra so ty resolves it)
         # ty type-checks every imported module; missing optional-extra
         # imports surface as `unresolved-import` even though the source
         # gates them behind `try: ... except ImportError`. Installing the
         # extras here keeps the source clean (no per-extra ignore comments
         # that would also need to fire under different installs).
-        run: uv sync --group dev --extra clustering --extra model2vec --python 3.13
+        run: uv sync --group dev --extra model2vec --python 3.13
 
       - name: Build PyO3 extension (ty needs the cdylib to resolve _rust.*)
         # Without this step ty reports `unresolved-import` for every
@@ -102,8 +102,8 @@ jobs:
       - name: Install Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies (clustering + model2vec extras so the ty hook resolves both)
-        run: uv sync --group dev --extra clustering --extra model2vec --python 3.13
+      - name: Install dependencies (model2vec extra so the ty hook resolves it)
+        run: uv sync --group dev --extra model2vec --python 3.13
 
       - name: Build PyO3 extension
         run: uv run maturin develop --release

@@ -363,65 +363,10 @@ def test_reranker_excluded_blocks_load(monkeypatch):
 # -----------------------------------------------------------------------------
 # KNT-105 — semantic dedup similarity reporting
 # -----------------------------------------------------------------------------
-
-
-def test_semantic_dedup_threshold_validated():
-    """distance_threshold outside cosine domain [0, 2] is rejected at
-    construction time."""
-    from kaos_nlp_transformers.clustering.semantic_dedup import SemanticDedupLevel
-
-    with pytest.raises(ValueError, match=r"distance_threshold"):
-        SemanticDedupLevel(distance_threshold=-0.1)
-    with pytest.raises(ValueError, match=r"distance_threshold"):
-        SemanticDedupLevel(distance_threshold=3.0)
-    # Valid thresholds construct cleanly.
-    SemanticDedupLevel(distance_threshold=0.0)
-    SemanticDedupLevel(distance_threshold=0.10)
-    SemanticDedupLevel(distance_threshold=2.0)
-
-
-def test_semantic_dedup_returns_real_similarity(monkeypatch):
-    """With three near-duplicate embeddings, the cluster's similarity must
-    be in (0.5, 1.0) — not the inherited 1.0 default."""
-    pytest.importorskip("scipy", reason="SemanticDedupLevel requires the [clustering] extra")
-    from kaos_content.dedup.types import DedupDocument
-
-    from kaos_nlp_transformers.clustering import semantic_dedup as sd
-
-    # Three rows: rows 0 and 1 are very close; row 2 is far away.
-    fake_vecs = np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.95, 0.31, 0.0],  # cosine ~0.95 vs row 0
-            [0.0, 0.0, 1.0],  # cosine 0 vs row 0
-        ],
-        dtype=np.float32,
-    )
-
-    fake_model = MagicMock()
-    fake_model.embed.return_value = fake_vecs
-    # find_clusters lazy-imports EmbeddingModel from kaos_nlp_transformers.embedding,
-    # so we monkeypatch that module rather than the dedup module.
-    from kaos_nlp_transformers import embedding as embedding_mod
-
-    monkeypatch.setattr(
-        embedding_mod.EmbeddingModel, "load", classmethod(lambda *a, **k: fake_model)
-    )
-
-    docs = [
-        DedupDocument(doc_id="a", text="this is text one"),
-        DedupDocument(doc_id="b", text="this is text two close to one"),
-        DedupDocument(doc_id="c", text="completely unrelated"),
-    ]
-    level = sd.SemanticDedupLevel(distance_threshold=0.20)
-    clusters = level.find_clusters(docs)
-    assert len(clusters) == 1, [c.member_doc_ids for c in clusters]
-    cluster = clusters[0]
-    # a and b should cluster; their mean cosine ≈ 0.95.
-    assert set(cluster.member_doc_ids) == {"a", "b"}
-    assert 0.90 <= cluster.similarity <= 1.0
-    # And critically: NOT the inherited 1.0 default (real intra-cluster sim).
-    assert cluster.similarity != 1.0
+# Both tests (`test_semantic_dedup_threshold_validated` /
+# `test_semantic_dedup_returns_real_similarity`) moved to kaos-content
+# alongside the SemanticDedupLevel implementation (KNT-602 0.2.0a3).
+# See kaos-content/tests/unit/test_dedup_semantic.py.
 
 
 # -----------------------------------------------------------------------------
@@ -600,43 +545,6 @@ def test_retriever_length_invariant_after_random_appends():
         assert len(r._metadata_list) == n
 
 
-def test_semantic_dedup_threshold_monotonicity(monkeypatch):
-    """For a fixed embedding matrix, tightening the threshold must never
-    INCREASE the total number of clustered members. (Membership is a
-    monotonic non-increasing function of distance_threshold under
-    average-linkage hierarchical clustering.)"""
-    pytest.importorskip("scipy", reason="SemanticDedupLevel requires the [clustering] extra")
-    from kaos_content.dedup.types import DedupDocument
-
-    from kaos_nlp_transformers.clustering import semantic_dedup as sd
-
-    rng = np.random.default_rng(0)
-    n = 12
-    dim = 16
-    vecs = rng.standard_normal((n, dim)).astype(np.float32)
-    # Make some pairs near-duplicates to populate clusters at low thresholds.
-    vecs[1] = vecs[0] + 0.01 * rng.standard_normal(dim)
-    vecs[3] = vecs[2] + 0.02 * rng.standard_normal(dim)
-    vecs[5] = vecs[4] + 0.05 * rng.standard_normal(dim)
-    # L2-normalize so the dedup level can do its math correctly.
-    vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
-
-    fake_model = MagicMock()
-    fake_model.embed.return_value = vecs
-    from kaos_nlp_transformers import embedding as embedding_mod
-
-    monkeypatch.setattr(
-        embedding_mod.EmbeddingModel, "load", classmethod(lambda *a, **k: fake_model)
-    )
-
-    docs = [DedupDocument(doc_id=f"d{i}", text=f"document {i}") for i in range(n)]
-
-    last_membership_count = n  # upper bound
-    for thr in [0.50, 0.30, 0.20, 0.10, 0.05, 0.02]:
-        clusters = sd.SemanticDedupLevel(distance_threshold=thr).find_clusters(docs)
-        membership_count = sum(len(c.member_doc_ids) for c in clusters)
-        assert membership_count <= last_membership_count, (
-            f"Threshold {thr}: membership_count={membership_count} > "
-            f"prior {last_membership_count}; threshold-monotonicity violated."
-        )
-        last_membership_count = membership_count
+# `test_semantic_dedup_threshold_monotonicity` moved to kaos-content
+# alongside the SemanticDedupLevel implementation (KNT-602 0.2.0a3).
+# See kaos-content/tests/unit/test_dedup_semantic.py.

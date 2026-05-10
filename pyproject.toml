@@ -48,7 +48,6 @@ classifiers = [
 
 dependencies = [
   "kaos-core>=0.1.0a1",
-  "kaos-content>=0.1.0a1",
   "kaos-nlp-core>=0.1.0a1",
   "numpy>=2.1",
   # Audit KNT-601 (0.2.0): fastembed removed. Embedding inference now
@@ -57,6 +56,11 @@ dependencies = [
   # built by maturin from the Cargo.toml at the repo root; nothing in
   # this list reflects it because it's bundled in the wheel itself.
   #
+  # KNT-602 Option A (0.2.0a3): kaos-content was REMOVED from base
+  # deps. The SemanticDedupLevel impl + dedup MCP tool moved to
+  # kaos-content. This package no longer imports kaos_content from
+  # any source path (test_audit_07.py pins this regression).
+  #
   # huggingface_hub stays an explicit base dep because the model2vec
   # loader (the static-embedding code path) calls snapshot_download
   # directly. Pre-KNT-601 it was transitive via fastembed.
@@ -64,9 +68,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# scipy gates SemanticDedupLevel (audit-01 KNT-002). The base install
-# does not require scipy; only consumers of the dedup level pull it in.
-clustering = ["scipy>=1.14.1"]
+# KNT-602 Option A (0.2.0a3): the [clustering] extra (scipy +
+# SemanticDedupLevel) moved to kaos-content. Use
+# `pip install kaos-content[clustering]` to pick up the new home.
+# This package no longer ships a clustering surface — only the
+# embedding / reranker / device primitives.
 # Audit-06 KNT-501: ``[torch]`` is a deprecated no-op alias as of
 # 0.1.0a6. Audit KNT-601 (0.2.0): scheduled for removal in 0.3.0; one
 # more release cycle of compatibility-resolution.

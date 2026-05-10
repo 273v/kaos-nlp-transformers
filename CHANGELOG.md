@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0a3] — 2026-05-10 — KNT-602 boundary fix (drop kaos-content dep)
+
+KNT-602 Option A: restores the documented layer cake. kaos-content is
+the consumer of kaos-nlp-transformers; never the inverse. The
+``SemanticDedupLevel`` + the ``kaos-nlp-transformers-dedup-semantic``
+MCP tool moved to kaos-content (released as 0.1.0a3). This package
+now ships the embedding / reranker / device primitives only.
+
+### Breaking changes
+
+- **MCP tool removed**: ``kaos-nlp-transformers-dedup-semantic`` is no
+  longer registered by ``register_transformers_tools``. **No
+  deprecation cycle.** The replacement is
+  ``kaos-content-dedup-semantic`` in kaos-content 0.1.0a3+ (mirror of
+  the kaos-content CHANGELOG breaking-change entry). Rationale: a
+  one-cycle deprecation shim would have to import
+  ``SemanticDedupLevel`` from kaos-content, re-introducing the
+  dep-cycle the move is fixing. The package is in the pre-1.0 alpha
+  series (0.2.0a*), under which the cross-monorepo standards
+  (``kaos-modules-auth/docs/oss/20-python-packaging/public-api-discipline.md``)
+  permit breaking changes when documented. Downstream agents calling
+  the old name should switch to ``kaos-content-dedup-semantic`` and
+  install ``kaos-content[transformers,clustering]`` to enable the
+  level. Existing code paths that imported
+  ``kaos_nlp_transformers.clustering.SemanticDedupLevel`` should
+  re-import from ``kaos_content.dedup.levels.semantic``.
+- **Module removed**: ``kaos_nlp_transformers.clustering`` package
+  is deleted. ``import kaos_nlp_transformers.clustering`` now raises
+  ``ImportError``. ``test_audit_07.py`` pins the regression that the
+  module stays gone.
+
+### Removed
+
+- **kaos-content from base dependencies** in ``pyproject.toml``. Pre-
+  KNT-602 the package shipped ``kaos-content>=0.1.0a1`` as a base
+  runtime dep (used only by the dedup level + MCP tool). Both moved
+  out, so the dep is removed entirely from ``[project.dependencies]``.
+  Downstream consumers of the base install no longer pull
+  ``kaos-content`` and its transitive ``kaos-core`` / ``pydantic``
+  surface unless they request it.
+- **`[clustering]` extra** (``scipy>=1.14.1``). ``scipy`` moved with
+  ``SemanticDedupLevel`` to ``kaos-content[clustering]``; that's now
+  the canonical home.
+- AGENTS.md / CHANGELOG / settings.py docstrings refreshed to drop
+  references to the retired ``[clustering]`` extra and the
+  in-package ``SemanticDedupLevel`` location.
+
+### Added
+
+- **`tests/unit/test_audit_07.py`** — regression tests pinning the
+  KNT-602 boundary fix: no ``kaos_content`` imports anywhere in the
+  package source, no ``clustering`` submodule importable, no
+  ``kaos-nlp-transformers-dedup-semantic`` tool registered, no
+  ``kaos-content`` dep in ``[project].dependencies``. Mirrors the
+  KNT-001 ``test_no_kaos_ml_core_import_anywhere`` pattern.
+
 ## [0.2.0a2] — 2026-05-09 — release-pipeline fixes (no API change)
 
 Re-roll of the 0.2.0a1 alpha; nothing landed on PyPI for 0.2.0a1 because

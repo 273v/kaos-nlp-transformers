@@ -45,30 +45,8 @@ def test_no_kaos_ml_core_import_anywhere():
 # -----------------------------------------------------------------------------
 # KNT-002 — scipy is gated with an actionable install-hint
 # -----------------------------------------------------------------------------
-
-
-def test_semantic_dedup_raises_install_hint_when_scipy_missing(monkeypatch):
-    """SemanticDedupLevel.find_clusters must raise an ImportError that
-    references the [clustering] extra when scipy is unavailable, not let the
-    raw ModuleNotFoundError from `import scipy` bubble up unhinted.
-    """
-    import sys
-
-    from kaos_content.dedup.types import DedupDocument
-
-    from kaos_nlp_transformers.clustering.semantic_dedup import SemanticDedupLevel
-
-    # Hide every scipy submodule attempt by inserting None (pep 328 sentinel
-    # that makes `from X import Y` fail).
-    for mod in list(sys.modules):
-        if mod == "scipy" or mod.startswith("scipy."):
-            monkeypatch.setitem(sys.modules, mod, None)
-    monkeypatch.setitem(sys.modules, "scipy.cluster.hierarchy", None)
-    monkeypatch.setitem(sys.modules, "scipy.spatial.distance", None)
-
-    docs = [DedupDocument(doc_id=str(i), text=f"document {i}") for i in range(3)]
-    with pytest.raises(ImportError, match=r"\[clustering\]"):
-        SemanticDedupLevel().find_clusters(docs)
+# Test moved to kaos-content/tests/unit/test_dedup_semantic.py::TestInstallHints
+# alongside the SemanticDedupLevel implementation (KNT-602 0.2.0a3).
 
 
 # -----------------------------------------------------------------------------
@@ -125,16 +103,9 @@ def test_retriever_factories_accept_settings():
         )
 
 
-def test_semantic_dedup_accepts_settings():
-    """``SemanticDedupLevel.__init__`` must accept ``settings`` kwarg."""
-    import inspect
-
-    from kaos_nlp_transformers.clustering.semantic_dedup import SemanticDedupLevel
-
-    params = inspect.signature(SemanticDedupLevel.__init__).parameters
-    assert "settings" in params, (
-        "SemanticDedupLevel must accept settings kwarg per audit-01 KNT-004."
-    )
+# `test_semantic_dedup_accepts_settings` moved to
+# kaos-content/tests/unit/test_dedup_semantic.py::TestConstructor::test_accepts_settings_kwarg
+# alongside the SemanticDedupLevel implementation (KNT-602 0.2.0a3).
 
 
 # -----------------------------------------------------------------------------

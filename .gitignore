@@ -14,7 +14,6 @@ build/
 venv/
 
 # uv lockfile (pinned per-developer; not committed for editable workspace pkgs)
-uv.lock
 
 # Tooling caches
 .pytest_cache/

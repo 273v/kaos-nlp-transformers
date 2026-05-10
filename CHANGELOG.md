@@ -69,6 +69,17 @@ level fix obsoletes the workaround.
   Mirrors the rollout from kaos-core. **Depends on PR #3** (B615
   HF snapshot_download explicit revision) — bandit will fail on
   this branch's first run until #3 merges, then rebase clears it.
+### Changed
+
+- **uv.lock is now tracked in git.** Previously gitignored at v0.1.0a1
+  because the ``[mcp]`` optional extra (and the ``kaos-mcp`` dev
+  dependency) referenced a sibling not yet on PyPI; ``uv lock``
+  couldn't resolve them. ``kaos-mcp`` shipped (0.1.0a2), so the
+  original gating reason no longer applies. Tracking the lockfile
+  gives reproducible local dev environments, lets Dependabot surface
+  sibling-version bumps as PRs, and makes the supply-chain pin set
+  publicly auditable. Mirrors the org-wide convention being adopted
+  across all 16 kaos-* repos.
 
 ## [0.2.0a3] — 2026-05-10 — KNT-602 boundary fix (drop kaos-content dep)
 

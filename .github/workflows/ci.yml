@@ -134,33 +134,64 @@ jobs:
 
   # ────────────── test (Python × maturin develop) ──────────────
   test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: kaos-x64-16core
-    # Stable matrix entries gate PRs; experimental entries
-    # (3.14t free-threaded, 3.15-dev pre-release) are informational
-    # only — the matrix `experimental: true` flag flips
-    # `continue-on-error` so CI is not blocked by upstream churn we
-    # cannot fix.
+    name: Test (${{ matrix.display-os }} / Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    # Linux x64 (self-hosted) keeps the full 4-Python-version matrix
+    # for fast PR feedback. macOS-arm64 + Windows-x64 each get a single
+    # Python 3.13 leg, gated experimental until proven stable.
+    # Stable Linux entries gate PRs; experimental entries (3.14t
+    # free-threaded, 3.15-dev pre-release, AND the cross-OS legs)
+    # are informational only — `continue-on-error` flips on
+    # `experimental: true` so CI isn't blocked by upstream churn or
+    # transient runner issues we can't fix.
+    #
+    # Pattern matches kaos-core / kaos-graph / kaos-nlp-core /
+    # kaos-ml-core ci.yml. KNT-602 audit follow-up E4.
     strategy:
       fail-fast: false
       matrix:
         include:
+          # ── Linux x64 (self-hosted) — full Python matrix ──
           - python-version: "3.13"
+            os: kaos-x64-16core
+            display-os: linux-x64
             experimental: false
           - python-version: "3.14"
+            os: kaos-x64-16core
+            display-os: linux-x64
             experimental: false
-          # Free-threaded build (PEP 703). Available since 3.14 GA.
-          # Audit KNT-601 / KNT-602: our cdylib declares
-          # `gil_used = false`, so this leg now exercises the actual
-          # GIL-disabled extension, not just pure-Python imports.
+          # Free-threaded build (PEP 703). Audit KNT-601 / KNT-602:
+          # our cdylib declares `gil_used = false`, so this leg
+          # exercises the actual GIL-disabled extension, not just
+          # pure-Python imports.
           - python-version: "3.14t"
+            os: kaos-x64-16core
+            display-os: linux-x64
             experimental: true
-          # Pre-release of 3.15 (expected GA October 2026). Catches
-          # ecosystem incompatibilities (deferred annotations, removed
-          # APIs) before consumers hit them.
+          # Pre-release of 3.15 (expected GA October 2026).
           - python-version: "3.15"
+            os: kaos-x64-16core
+            display-os: linux-x64
+            experimental: true
+          # ── macOS arm64 — single Python smoke ──
+          - python-version: "3.13"
+            os: macos-14
+            display-os: macos-arm64
+            experimental: true
+          # ── Windows x64 — single Python smoke ──
+          - python-version: "3.13"
+            os: windows-latest
+            display-os: windows-x64
             experimental: true
     continue-on-error: ${{ matrix.experimental }}
+    env:
+      # PEP 540 UTF-8 Mode + stdout encoding override. Windows cp1252
+      # default codepage crashes on Unicode stdout (`UnicodeEncodeError:
+      # 'charmap' codec can't encode character ✓`) and on file opens
+      # without explicit encoding= (`UnicodeDecodeError`). No-op on
+      # Linux/macOS. Lessons from kaos-* family cross-OS work.
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -173,37 +204,32 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-          # One cache per matrix leg. Without this, all 4 jobs race
-          # on the same cache key and only the first to finish wins —
-          # the others throw away their compiled wheels (numpy on
-          # 3.14t / 3.15) and recompile from source on every run. The
-          # annotation "Failed to save: Unable to reserve cache with
-          # key …" in the prior CI logs is exactly this race.
-          cache-suffix: test-py${{ matrix.python-version }}
+          # Per-leg cache key — without this, all matrix legs race on
+          # the same cache key and only the first wins, causing the
+          # others to recompile heavy native deps (numpy on 3.14t /
+          # 3.15) from source on every run.
+          cache-suffix: test-${{ matrix.display-os }}-py${{ matrix.python-version }}
 
       - name: Install Python ${{ matrix.python-version }}
         # `--preview` lets `uv python install` resolve in-development
         # interpreters (3.15) and the free-threaded variant (3.14t).
-        # No-op for stable versions.
         run: uv python install --preview ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: uv sync --group dev --python ${{ matrix.python-version }}
 
       - name: Build PyO3 extension (maturin develop --release)
-        # KNT-601: the package is now hybrid Rust+Python. The Rust
-        # cdylib must be compiled and installed into the venv before
-        # pytest can import `kaos_nlp_transformers._rust`.
+        # KNT-601: the package is hybrid Rust+Python. The cdylib must
+        # be compiled and installed into the venv before pytest can
+        # import `kaos_nlp_transformers._rust`.
         run: uv run maturin develop --release
 
       - name: Run unit tests with coverage
-        # Only `tests/unit/` runs in regular CI. `tests/integration/`
-        # is the live-tier (real provider APIs / GPU) and runs
-        # separately with credentials gated behind a manual workflow.
-        #
-        # `-m "not live"` deselects @pytest.mark.live tests that
-        # exercise real model downloads and provider APIs — they
-        # cannot run hermetically in CI.
+        # `shell: bash` so the multi-line `\` continuations work on
+        # Windows runners (default PowerShell parses `\` as a unary
+        # operator and errors out). Git Bash is preinstalled on
+        # `windows-latest`.
+        shell: bash
         run: |
           uv run pytest tests/unit/ \
             -m "not live" \
@@ -216,7 +242,7 @@ jobs:
         if: always() && !matrix.experimental
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-${{ matrix.python-version }}
+          name: coverage-${{ matrix.display-os }}-py${{ matrix.python-version }}
           path: coverage.xml
           retention-days: 14
 

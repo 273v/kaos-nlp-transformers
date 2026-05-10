@@ -359,16 +359,32 @@ jobs:
         # `rm -rf /tmp/smoke` first because the kaos-x64-16core
         # self-hosted runner persists /tmp between runs.
         #
+        # `cd /tmp/smoke` before running the python probe so the
+        # workspace ``kaos_nlp_transformers/`` source tree (which
+        # ships ``_rust/*.pyi`` stubs but NO ``_rust.abi3.so`` —
+        # the cdylib only exists in the wheel install) doesn't
+        # shadow the wheel-installed package via sys.path[0] = cwd.
+        # Without this, ``from kaos_nlp_transformers._rust.embedding
+        # import EmbeddingBackend`` (called from inside
+        # ``EmbeddingModel.load``) raises ``ModuleNotFoundError``
+        # because Python finds the source-tree namespace package
+        # first.
+        #
         # We DO download a real model in CI here — the package is an
         # ML library; a smoke test that doesn't load and run a model
         # is documentation, not verification. BAAI/bge-small-en-v1.5
         # ONNX is ~30MiB, downloads in seconds, runs on CPU.
+        env:
+          # Belt-and-suspenders: even with the cd below, PYTHONSAFEPATH
+          # disables prepending sys.path[0] = cwd entirely. Python 3.11+.
+          PYTHONSAFEPATH: "1"
         run: |
           rm -rf /tmp/smoke
           uv venv --python 3.13 /tmp/smoke
           uv pip install --python /tmp/smoke/bin/python --reinstall \
-            dist/kaos_nlp_transformers-*.whl
-          /tmp/smoke/bin/python -c "
+            "$(pwd)/dist/"kaos_nlp_transformers-*.whl
+          cd /tmp/smoke
+          ./bin/python -c "
           import numpy as np
 
           import kaos_nlp_transformers
@@ -402,7 +418,7 @@ jobs:
           # Device detection runs and returns the expected dataclass.
           # This transitively exercises the cdylib (capabilities() is
           # called from device.py) without forcing the ambiguous
-          # `from _rust import <sub>` path.
+          # 'from _rust import <sub>' path.
           devs = detect_devices()
           assert hasattr(devs, 'devices') and hasattr(devs, 'best') and hasattr(devs, 'has_gpu')
           assert any(d.device == 'cpu' for d in devs.devices)

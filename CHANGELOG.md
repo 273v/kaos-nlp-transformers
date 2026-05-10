@@ -9,24 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **CI: ``build + wheel smoke test`` job aligned with ``release.yml``
-  pattern.** The ``ci.yml`` wheel-smoke step still did
-  ``from kaos_nlp_transformers._rust import registry`` even though
-  the same import was retired from ``release.yml`` in 0.2.0a2 with a
-  thorough comment explaining the wheel-install namespace-package
-  ambiguity (``_rust/*.pyi`` stubs shadow ``_rust.abi3.so`` on some
-  CPython builds). That import has been failing in CI every run
-  since the smoke step was introduced, blocking the workflow signal
-  even though every test-matrix leg (which exercises the same
-  ``_rust.<submodule>`` imports via ``maturin develop`` + pytest)
-  passes. Mirrored the release.yml pattern: smoke now verifies the
-  cdylib transitively via ``EmbeddingModel.load`` + ``embed`` (which
-  fails fast if the .so isn't loaded) and ``detect_devices()`` (which
-  calls into ``_rust.registry.capabilities`` through the documented
-  Python wrapper). Also wiped ``/tmp/smoke`` before ``uv venv`` and
-  added ``--reinstall`` to ``uv pip install`` so the self-hosted
-  runner doesn't serve stale ``_rust.abi3.so`` artifacts between
-  runs. Files: ``.github/workflows/ci.yml``.
+- **CI: ``build + wheel smoke test`` shouldn't import from the
+  workspace cwd.** The smoke step ran ``python -c "..."`` with the
+  workflow's default cwd (the workspace, which contains the
+  ``kaos_nlp_transformers/`` source tree). Python prepends
+  ``sys.path[0] = cwd`` by default, so ``from
+  kaos_nlp_transformers._rust.embedding import EmbeddingBackend``
+  (called transitively from ``EmbeddingModel.load``) resolved
+  against the *source* tree — which ships ``_rust/*.pyi`` stubs but
+  NO ``_rust.abi3.so`` (the cdylib only exists in the wheel install)
+  — and raised ``ModuleNotFoundError: No module named
+  'kaos_nlp_transformers._rust.embedding'``. The wheel was correct;
+  the test environment was wrong.
+
+  Fix: set ``PYTHONSAFEPATH=1`` (Python 3.11+) on the step env so
+  Python doesn't prepend cwd to sys.path, and ``cd /tmp/smoke``
+  before the python probe so we're not even sitting in the source
+  tree. Belt-and-suspenders.
+
+  Also aligned with the ``release.yml`` pattern documented in the
+  0.2.0a2 CHANGELOG: the smoke no longer reaches into
+  ``_rust.<submodule>`` from a one-liner (that pattern is fragile
+  even with PYTHONSAFEPATH because of the ``_rust.abi3.so`` vs
+  ``_rust/`` namespace-package ambiguity on the wheel-install
+  layout). The full ``_rust.<submodule>`` direct-import chain stays
+  covered by every test-matrix leg via ``maturin develop`` +
+  ``tests/unit/test_rust_extension.py``.
+
+  Wiped ``/tmp/smoke`` before ``uv venv`` and added ``--reinstall``
+  to ``uv pip install`` so the self-hosted runner doesn't reuse
+  stale state.
+
+  Files: ``.github/workflows/ci.yml``.
 
 ## [0.2.0a3] — 2026-05-10 — KNT-602 boundary fix (drop kaos-content dep)
 

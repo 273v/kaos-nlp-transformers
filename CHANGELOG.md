@@ -62,6 +62,13 @@ Once this PR + PR #1 both land, the ``PYTHONSAFEPATH=1`` +
 ``cd /tmp/smoke`` workaround in ``.github/workflows/ci.yml``'s
 smoke-test step can be reverted as a follow-up — the packaging-
 level fix obsoletes the workaround.
+- **bandit + vulture now run in both pre-commit and CI.** Two new
+  hooks in ``.pre-commit-config.yaml`` (bandit + vulture), mirrored
+  by two new jobs in ``security.yml`` (``bandit (static security)``
+  + ``vulture (dead-code scan)``). Skip lists justified inline.
+  Mirrors the rollout from kaos-core. **Depends on PR #3** (B615
+  HF snapshot_download explicit revision) — bandit will fail on
+  this branch's first run until #3 merges, then rebase clears it.
 
 ## [0.2.0a3] — 2026-05-10 — KNT-602 boundary fix (drop kaos-content dep)
 

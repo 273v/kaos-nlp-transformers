@@ -28,6 +28,10 @@ ignore = [
   # failed on every CI run. Make the acknowledgement load-bearing.
   # Drop this ignore once ``tokenizers`` migrates off ``paste``
   # (track via https://github.com/huggingface/tokenizers).
+  #
+  # last-checked: 2026-05-10  —  re-check by: 2026-08-10
+  # (90-day cadence; re-evaluate by inspecting tokenizers' latest
+  # release Cargo.toml for the paste / pastey switch).
   "RUSTSEC-2024-0436",
 ]
 

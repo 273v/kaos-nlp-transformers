@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **cargo-deny: ignore ``RUSTSEC-2024-0436`` (paste unmaintained).**
+  ``paste 1.0.15`` is pulled transitively via
+  ``tokenizers 0.22.2 → macro_rules_attribute 0.2.2 → paste``. It's a
+  proc-macro crate (compile-time only — nothing ships in the wheel at
+  runtime) and the advisory itself notes "No safe upgrade is
+  available" pending the ``pastey`` migration. The
+  ``audit-KNT-601 §15`` block in ``deny.toml`` already documented
+  this, but the ``ignore`` list was empty so ``cargo-deny`` failed
+  on every CI run. Made the acknowledgement load-bearing. Drop the
+  ignore once ``tokenizers`` migrates off ``paste``. Files:
+  ``deny.toml``.
+
 ## [0.2.0a3] — 2026-05-10 — KNT-602 boundary fix (drop kaos-content dep)
 
 KNT-602 Option A: restores the documented layer cake. kaos-content is

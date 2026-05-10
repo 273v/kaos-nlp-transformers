@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI: ``build + wheel smoke test`` job aligned with ``release.yml``
+  pattern.** The ``ci.yml`` wheel-smoke step still did
+  ``from kaos_nlp_transformers._rust import registry`` even though
+  the same import was retired from ``release.yml`` in 0.2.0a2 with a
+  thorough comment explaining the wheel-install namespace-package
+  ambiguity (``_rust/*.pyi`` stubs shadow ``_rust.abi3.so`` on some
+  CPython builds). That import has been failing in CI every run
+  since the smoke step was introduced, blocking the workflow signal
+  even though every test-matrix leg (which exercises the same
+  ``_rust.<submodule>`` imports via ``maturin develop`` + pytest)
+  passes. Mirrored the release.yml pattern: smoke now verifies the
+  cdylib transitively via ``EmbeddingModel.load`` + ``embed`` (which
+  fails fast if the .so isn't loaded) and ``detect_devices()`` (which
+  calls into ``_rust.registry.capabilities`` through the documented
+  Python wrapper). Also wiped ``/tmp/smoke`` before ``uv venv`` and
+  added ``--reinstall`` to ``uv pip install`` so the self-hosted
+  runner doesn't serve stale ``_rust.abi3.so`` artifacts between
+  runs. Files: ``.github/workflows/ci.yml``.
+
 ## [0.2.0a3] — 2026-05-10 — KNT-602 boundary fix (drop kaos-content dep)
 
 KNT-602 Option A: restores the documented layer cake. kaos-content is

@@ -341,13 +341,33 @@ jobs:
         # not being included in the wheel, py.typed marker not shipped,
         # etc.
         #
+        # The smoke deliberately does NOT reach into `_rust.<submodule>`
+        # from a one-liner. The installed wheel ships both
+        # `_rust.abi3.so` (the cdylib) and `_rust/*.pyi` (type stubs)
+        # under the same directory, and CPython's namespace-package
+        # detector can resolve `from kaos_nlp_transformers._rust import
+        # <sub>` ambiguously on some runners — the directory shadows
+        # the .so and the import fails with
+        # `cannot import name '<sub>' from
+        # 'kaos_nlp_transformers._rust' (unknown location)`. This is
+        # the same workaround `release.yml` adopted in 0.2.0a2; we
+        # mirror it here. The full `_rust.<submodule>` import chain is
+        # still gated by every test-matrix leg above via `maturin
+        # develop` + `tests/unit/test_rust_extension.py`, which is the
+        # authoritative check.
+        #
+        # `rm -rf /tmp/smoke` first because the kaos-x64-16core
+        # self-hosted runner persists /tmp between runs.
+        #
         # We DO download a real model in CI here — the package is an
         # ML library; a smoke test that doesn't load and run a model
         # is documentation, not verification. BAAI/bge-small-en-v1.5
         # ONNX is ~30MiB, downloads in seconds, runs on CPU.
         run: |
+          rm -rf /tmp/smoke
           uv venv --python 3.13 /tmp/smoke
-          uv pip install --python /tmp/smoke/bin/python dist/kaos_nlp_transformers-*.whl
+          uv pip install --python /tmp/smoke/bin/python --reinstall \
+            dist/kaos_nlp_transformers-*.whl
           /tmp/smoke/bin/python -c "
           import numpy as np
 
@@ -370,11 +390,6 @@ jobs:
           import importlib.resources as ir
           assert ir.files('kaos_nlp_transformers').joinpath('py.typed').is_file(), 'py.typed missing'
 
-          # Rust cdylib reachable and reporting CPU capability.
-          from kaos_nlp_transformers._rust import registry
-          caps = registry.capabilities()
-          assert caps['cpu'] is True, f'cpu cap missing: {caps}'
-
           # Registry has at least one license-vetted model and the EXCLUDED
           # list still names the known non-permissive ones.
           assert 'BAAI/bge-small-en-v1.5' in REGISTRY
@@ -385,11 +400,17 @@ jobs:
           assert s.default_model == 'BAAI/bge-small-en-v1.5'
 
           # Device detection runs and returns the expected dataclass.
+          # This transitively exercises the cdylib (capabilities() is
+          # called from device.py) without forcing the ambiguous
+          # `from _rust import <sub>` path.
           devs = detect_devices()
           assert hasattr(devs, 'devices') and hasattr(devs, 'best') and hasattr(devs, 'has_gpu')
           assert any(d.device == 'cpu' for d in devs.devices)
 
           # Real ML: load + embed + cosine similarity through the Rust ort backend.
+          # If the cdylib didn't load, EmbeddingModel.load would fail here
+          # — so the cdylib IS being exercised end-to-end, just via the
+          # documented public surface rather than a private import path.
           model = EmbeddingModel.load('BAAI/bge-small-en-v1.5')
           vecs = model.embed([
               'Force majeure clauses excuse performance.',

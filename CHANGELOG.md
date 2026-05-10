@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on every CI run. Made the acknowledgement load-bearing. Drop the
   ignore once ``tokenizers`` migrates off ``paste``. Files:
   ``deny.toml``.
+- **HuggingFace ``snapshot_download`` call now passes ``revision``
+  explicitly (bandit B615).** ``_load_model2vec_cached`` previously
+  built a ``snapshot_kwargs`` dict and called
+  ``snapshot_download(**snapshot_kwargs)``. The revision pin was in
+  the dict, so the behavior was already correct (audit-KNT-003), but
+  bandit's B615 detector can't follow ``**kwargs`` unpacking and
+  flagged the site as an unsafe download. Refactored to pass
+  ``revision=`` (and the other args) explicitly as keyword arguments
+  so the pin is statically visible. No behavior change — the
+  registered SHA is what flows through either way. Files:
+  ``kaos_nlp_transformers/embedding.py``.
 
 ## [0.2.0a3] — 2026-05-10 — KNT-602 boundary fix (drop kaos-content dep)
 

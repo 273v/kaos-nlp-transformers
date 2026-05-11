@@ -11,13 +11,28 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 ignore = [
-  # Known-but-non-impactful advisories — document with justification +
-  # ticket before adding entries here. Empty at 0.2.0 lock-in. The
-  # supply-chain audit (KNT-601 §15 of MIGRATION_0_2_0.md) found:
-  #   - 0 vulnerabilities for the Strategy C (ort direct) lockfile
-  #   - 1 unmaintained warning: paste 1.0.15 (transitive via tokenizers)
-  # paste is not impactful at runtime — it's a proc-macro for code
-  # generation. Re-evaluate when tokenizers 0.23+ migrates.
+  # RUSTSEC-2024-0436: ``paste 1.0.15`` is unmaintained (author
+  # archived the repo; suggested replacements are ``pastey`` or
+  # ``with_builtin_macros``). We pull it transitively via
+  #
+  #     paste 1.0.15
+  #       ├── macro_rules_attribute 0.2.2
+  #       │   └── tokenizers 0.22.2 (direct dep)
+  #       └── tokenizers 0.22.2 (*)
+  #
+  # ``paste`` is a proc-macro crate — it expands at compile time,
+  # ships nothing into the wheel at runtime, and has no known
+  # correctness or security defects. The audit-KNT-601 §15
+  # (MIGRATION_0_2_0.md) comment block already acknowledged this
+  # advisory but left the ``ignore`` list empty, so ``cargo-deny``
+  # failed on every CI run. Make the acknowledgement load-bearing.
+  # Drop this ignore once ``tokenizers`` migrates off ``paste``
+  # (track via https://github.com/huggingface/tokenizers).
+  #
+  # last-checked: 2026-05-10  —  re-check by: 2026-08-10
+  # (90-day cadence; re-evaluate by inspecting tokenizers' latest
+  # release Cargo.toml for the paste / pastey switch).
+  "RUSTSEC-2024-0436",
 ]
 
 [licenses]

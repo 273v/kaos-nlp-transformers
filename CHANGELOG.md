@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **cargo-audit: ignore ``RUSTSEC-2024-0436`` (paste unmaintained) via
+  ``.cargo/audit.toml``.** cargo-audit and cargo-deny consult separate
+  advisory sources; ignoring the advisory in ``deny.toml`` is not
+  enough on its own. The cargo-audit job in ``security.yml`` continued
+  to fail (compounded by missing ``checks: write`` permission, which
+  surfaces as ``Resource not accessible by integration`` when the
+  audit-check action tries to annotate findings). Added an
+  ``.cargo/audit.toml`` ignore list mirroring ``deny.toml``'s
+  acknowledgement, and granted the workflow ``checks: write`` so the
+  audit action's check-run creation succeeds. Drop the ignore in
+  both files together once tokenizers migrates off ``paste``. Files:
+  ``.cargo/audit.toml`` (new), ``.github/workflows/security.yml``.
 - **cargo-deny: ignore ``RUSTSEC-2024-0436`` (paste unmaintained).**
   ``paste 1.0.15`` is pulled transitively via
   ``tokenizers 0.22.2 → macro_rules_attribute 0.2.2 → paste``. It's a

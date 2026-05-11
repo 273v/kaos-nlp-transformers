@@ -853,14 +853,17 @@ def _load_model2vec_cached(
         raise BackendNotInstalledError(msg) from exc
 
     try:
-        snapshot_kwargs: dict[str, Any] = {
-            "repo_id": model_id,
-            "revision": revision,
-            "repo_type": "model",
-        }
-        if cache_dir:
-            snapshot_kwargs["cache_dir"] = cache_dir
-        local_path = snapshot_download(**snapshot_kwargs)
+        # ``revision`` is passed explicitly (not via **kwargs) so bandit's
+        # B615 detector can see the pin without following the dict
+        # construction. Audit-KNT-003: every model load carries a
+        # pinned revision; ``revision`` here is the registered SHA, never
+        # ``"main"``.
+        local_path = snapshot_download(
+            repo_id=model_id,
+            revision=revision,
+            repo_type="model",
+            cache_dir=cache_dir if cache_dir else None,
+        )
         return StaticModel.from_pretrained(local_path)
     except Exception as exc:
         msg = (

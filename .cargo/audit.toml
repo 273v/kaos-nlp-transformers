@@ -1,0 +1,23 @@
+# cargo-audit configuration (read by the `cargo audit` CLI and
+# the `rustsec/audit-check` GitHub Action).
+#
+# The advisory database ships informational warnings (unmaintained,
+# unsound, notice) in addition to actual vulnerabilities. We treat
+# vulnerabilities as hard failures but allow specific informational
+# warnings to pass when we have an audited justification — mirroring
+# the policy already encoded in `deny.toml` for cargo-deny.
+
+[advisories]
+ignore = [
+    # paste 1.0.15 — RUSTSEC-2024-0436 (unmaintained).
+    # Pulled transitively via tokenizers -> macro_rules_attribute -> paste.
+    # paste is a proc-macro crate (compile-time only; nothing ships into
+    # the wheel at runtime). No known correctness or security defects;
+    # advisory text says "No safe upgrade is available" pending the
+    # consumer migration to `pastey`. Same rationale already documented
+    # in deny.toml; cargo-audit just consults a different advisory
+    # source so we have to ignore in both places.
+    # Re-evaluate when tokenizers cuts a release that drops paste, or
+    # after 2026-08-07 (90 days from initial ignore on 2026-05-10).
+    "RUSTSEC-2024-0436",
+]

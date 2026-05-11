@@ -13,6 +13,12 @@ on:
 
 permissions:
   contents: read
+  # cargo-audit (via rustsec/audit-check) creates a GitHub Check Run
+  # to annotate advisory findings on the PR. Default GITHUB_TOKEN
+  # lacks `checks: write` on push events, which surfaces as
+  # `Resource not accessible by integration` and fails the job
+  # even when cargo-audit itself reports no vulnerabilities.
+  checks: write
 
 concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}

@@ -35,9 +35,9 @@ def test_rust_submodules_present():
 
 
 def test_capabilities_has_cpu():
-    from kaos_nlp_transformers._rust.registry import capabilities
+    from kaos_nlp_transformers._rust import registry
 
-    caps = capabilities()
+    caps = registry.capabilities()
     assert caps["cpu"] is True
     assert "cuda" in caps
     assert "openvino" in caps
@@ -51,18 +51,18 @@ def test_capabilities_has_cpu():
 def test_vendored_model_path_finds_potion():
     """The wheel ships minishlab/potion-base-8M vendored (audit-05 KNT-401).
     The Rust resolver must find it."""
-    from kaos_nlp_transformers._rust.registry import vendored_model_path
+    from kaos_nlp_transformers._rust import registry
 
-    path = vendored_model_path("minishlab/potion-base-8M")
+    path = registry.vendored_model_path("minishlab/potion-base-8M")
     assert path is not None, "vendored potion-base-8M not resolved"
     # The wheel's _vendor dir uses the slug shape "potion-base-8M".
     assert path.endswith("potion-base-8M")
 
 
 def test_vendored_model_path_returns_none_for_unknown():
-    from kaos_nlp_transformers._rust.registry import vendored_model_path
+    from kaos_nlp_transformers._rust import registry
 
-    assert vendored_model_path("definitely/not-vendored") is None
+    assert registry.vendored_model_path("definitely/not-vendored") is None
 
 
 def test_version_matches_python_metadata():

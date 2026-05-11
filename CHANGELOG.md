@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tests: `_rust` submodule imports updated for the single-file
+  `.pyi` consolidation.** Three test files (`tests/unit/test_rust_extension.py`,
+  `tests/integration/test_embed_gpu.py`,
+  `tests/integration/test_reranker_live.py`) still used the
+  pre-refactor `from kaos_nlp_transformers._rust.<submodule> import
+  <name>` pattern. After the stub-consolidation refactor, ty cannot
+  resolve `_rust.<submodule>` as a module because the new `.pyi`
+  exposes those names as classes inside `_rust.pyi` (the class-as-
+  namespace pattern). The runtime PyO3 cdylib still exposes the
+  submodules — the breakage was static-typing-only — but it surfaced
+  as Lint + Pre-commit hooks CI failures on every PR. Tests now use
+  the same `from kaos_nlp_transformers._rust import <submodule>`
+  pattern the production code (device.py / embedding.py /
+  reranker.py) was switched to in the refactor.
+
 ### Security
 
 - **cargo-audit: ignore ``RUSTSEC-2024-0436`` (paste unmaintained) via

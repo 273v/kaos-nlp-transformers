@@ -249,9 +249,13 @@ def _load_cross_encoder_cached(
     longer baked into the Python wrapper's release).
     """
     try:
-        from kaos_nlp_transformers._rust.reranker import (
-            CrossEncoderBackend,  # type: ignore[import-not-found]
-        )
+        # Attribute-style access through the parent ``_rust`` module so
+        # the single-file ``_rust.pyi`` stub resolves at type-check
+        # time. Identical runtime semantics to
+        # ``from _rust.reranker import CrossEncoderBackend``.
+        from kaos_nlp_transformers import _rust
+
+        CrossEncoderBackend = _rust.reranker.CrossEncoderBackend
     except ImportError as exc:
         msg = (
             "kaos_nlp_transformers._rust extension is not built. "

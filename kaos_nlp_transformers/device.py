@@ -158,11 +158,14 @@ def _detect_rust_capabilities() -> dict[str, Any]:
     CPU-only DeviceInfo.
     """
     try:
-        from kaos_nlp_transformers._rust.registry import (
-            capabilities,  # type: ignore[import-not-found]
-        )
+        # Attribute-style access through the parent ``_rust`` module so
+        # the single-file ``_rust.pyi`` stub (where submodules are
+        # represented as classes per the packaging note in that file)
+        # resolves at type-check time. The runtime semantics are
+        # identical to ``from _rust.registry import capabilities``.
+        from kaos_nlp_transformers import _rust
 
-        return dict(capabilities())
+        return dict(_rust.registry.capabilities())
     except ImportError:
         return {"cpu": True, "cuda": False, "openvino": False, "build_features": []}
 

@@ -31,6 +31,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the pin is statically visible. No behavior change — the
   registered SHA is what flows through either way. Files:
   ``kaos_nlp_transformers/embedding.py``.
+### Changed
+
+- **Type stubs for ``_rust`` consolidated into a single
+  ``_rust.pyi`` sibling file.** Previously the wheel shipped per-
+  submodule stubs in a ``kaos_nlp_transformers/_rust/`` subdirectory
+  next to ``_rust.abi3.so``. CPython's namespace-package detector
+  could ambiguously resolve ``_rust/`` as a package and shadow the
+  cdylib, surfacing as ``ImportError: cannot import name '<sub>'
+  from 'kaos_nlp_transformers._rust' (unknown location)`` on the
+  wheel-install smoke test (PR #1 worked around it with
+  ``PYTHONSAFEPATH=1`` + ``cd /tmp/smoke``). The new layout
+  eliminates the shadow entirely:
+  ``kaos_nlp_transformers/_rust.abi3.so`` (cdylib) +
+  ``kaos_nlp_transformers/_rust.pyi`` (single-file stubs, with
+  per-submodule types declared as nested classes). No ``_rust/``
+  directory exists in the wheel.
+- **Three internal call sites switched to attribute-style access
+  through the parent ``_rust`` module.** ``device.py``,
+  ``embedding.py``, and ``reranker.py`` previously imported via
+  ``from kaos_nlp_transformers._rust.<sub> import X``. With the
+  single-file stub, type checkers can't see ``<sub>`` as a real
+  module (it's a nested class in the stub); the import-style form
+  works at runtime but not at type-check time. Refactored to
+  ``from kaos_nlp_transformers import _rust;
+  X = _rust.<sub>.X`` — identical runtime semantics, fully resolved
+  by ``ty``. No external API change.
+
+Once this PR + PR #1 both land, the ``PYTHONSAFEPATH=1`` +
+``cd /tmp/smoke`` workaround in ``.github/workflows/ci.yml``'s
+smoke-test step can be reverted as a follow-up — the packaging-
+level fix obsoletes the workaround.
 
 ## [0.2.0a3] — 2026-05-10 — KNT-602 boundary fix (drop kaos-content dep)
 

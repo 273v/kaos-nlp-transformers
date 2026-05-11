@@ -692,9 +692,13 @@ def _load_rust_embedding_cached(
     in ``rust/core/model_loader.rs::resolve_paths``.
     """
     try:
-        from kaos_nlp_transformers._rust.embedding import (
-            EmbeddingBackend,  # type: ignore[import-not-found]
-        )
+        # Attribute-style access through the parent ``_rust`` module so
+        # the single-file ``_rust.pyi`` stub resolves at type-check
+        # time. Identical runtime semantics to
+        # ``from _rust.embedding import EmbeddingBackend``.
+        from kaos_nlp_transformers import _rust
+
+        EmbeddingBackend = _rust.embedding.EmbeddingBackend
     except ImportError as exc:
         msg = (
             "kaos_nlp_transformers._rust extension is not built. "

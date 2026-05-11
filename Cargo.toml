@@ -53,7 +53,7 @@ ort = { version = "2.0.0-rc.10", default-features = false, features = ["std", "n
 # Rust HF tokenizers crate — replaces the Python `tokenizers` wrapper.
 # `onig` matches what the Python wrapper uses for regex-based tokenizers
 # (BPE pre-tokenizer of the BAAI/bge-small-en-v1.5 we serve).
-tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 
 # hf-hub: snapshot_download equivalent in pure Rust. Honors the
 # KNT-003 pinned-revision contract by passing `revision` explicitly,

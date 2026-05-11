@@ -345,9 +345,23 @@ jobs:
         # ML library; a smoke test that doesn't load and run a model
         # is documentation, not verification. BAAI/bge-small-en-v1.5
         # ONNX is ~30MiB, downloads in seconds, runs on CPU.
+        # ``python-source = "."`` means ``kaos_nlp_transformers/`` lives at
+        # the repo root. CPython's default ``sys.path[0] = cwd`` then
+        # shadows the wheel install with the source tree, which only ships
+        # ``_rust.pyi`` (a type stub, not importable) — so
+        # ``from kaos_nlp_transformers._rust import registry`` raises
+        # ``ModuleNotFoundError`` even though the wheel is healthy.
+        # ``PYTHONSAFEPATH=1`` (PEP 711) drops the implicit cwd entry, and
+        # ``cd /tmp/smoke`` removes any other ambient relative-path hits.
+        # Canonical pattern documented in
+        # ``kaos-modules/docs/oss/40-ci-cd/hosted-runners.md``.
+        env:
+          PYTHONSAFEPATH: "1"
         run: |
+          rm -rf /tmp/smoke
           uv venv --python 3.13 /tmp/smoke
-          uv pip install --python /tmp/smoke/bin/python dist/kaos_nlp_transformers-*.whl
+          uv pip install --python /tmp/smoke/bin/python --reinstall dist/kaos_nlp_transformers-*.whl
+          cd /tmp/smoke
           /tmp/smoke/bin/python -c "
           import numpy as np
 

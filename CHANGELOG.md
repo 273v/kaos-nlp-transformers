@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI: wheel-smoke step no longer shadowed by the workspace source
+  tree.** ``python-source = "."`` means ``kaos_nlp_transformers/`` lives
+  at the repo root. CPython's default ``sys.path[0] = cwd`` makes
+  ``python -c "from kaos_nlp_transformers._rust import registry"`` (run
+  from the repo workdir) pick up the source tree — which only ships
+  ``_rust.pyi`` (a stub, not importable) after the single-file
+  consolidation — shadowing the wheel install in ``/tmp/smoke``.
+  Added ``PYTHONSAFEPATH=1`` (PEP 711, drops the implicit cwd entry)
+  plus ``cd /tmp/smoke`` plus ``--reinstall`` to the wheel-smoke step,
+  matching the canonical pattern documented in
+  ``kaos-modules/docs/oss/40-ci-cd/hosted-runners.md``. This is the
+  fix PR #1 (closed in favor of PR #7) originally carried; the
+  type-stub consolidation half of #1 was the actual root-cause fix
+  once paired with the PYTHONSAFEPATH guard. Files:
+  ``.github/workflows/ci.yml``.
+- **Tests: `_rust` submodule imports updated for the single-file
+  `.pyi` consolidation.** Three test files (`tests/unit/test_rust_extension.py`,
+  `tests/integration/test_embed_gpu.py`,
+  `tests/integration/test_reranker_live.py`) still used the
+  pre-refactor `from kaos_nlp_transformers._rust.<submodule> import
+  <name>` pattern. After the stub-consolidation refactor, ty cannot
+  resolve `_rust.<submodule>` as a module because the new `.pyi`
+  exposes those names as classes inside `_rust.pyi` (the class-as-
+  namespace pattern). The runtime PyO3 cdylib still exposes the
+  submodules — the breakage was static-typing-only — but it surfaced
+  as Lint + Pre-commit hooks CI failures on every PR. Tests now use
+  the same `from kaos_nlp_transformers._rust import <submodule>`
+  pattern the production code (device.py / embedding.py /
+  reranker.py) was switched to in the refactor.
+
 ### Security
 
 - **cargo-audit: ignore ``RUSTSEC-2024-0436`` (paste unmaintained) via

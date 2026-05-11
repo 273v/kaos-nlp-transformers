@@ -32,9 +32,7 @@ def _skip_if_no_rust_extension() -> None:
     the in-tree Rust cdylib. Guard against an editable install where
     ``maturin develop`` was never run."""
     try:
-        from kaos_nlp_transformers._rust.reranker import (  # noqa: F401
-            CrossEncoderBackend,
-        )
+        from kaos_nlp_transformers._rust import reranker as _reranker  # noqa: F401
     except ImportError:
         pytest.skip(
             "kaos_nlp_transformers._rust extension is not built — "
@@ -93,9 +91,9 @@ async def test_load_uses_rust_cross_encoder(reranker):
     in-tree Rust ``CrossEncoderBackend`` (ort + libonnxruntime), not
     fastembed's TextCrossEncoder. Audit history: KNT-501 (0.1.0a6)
     retired sentence-transformers' CrossEncoder."""
-    from kaos_nlp_transformers._rust.reranker import CrossEncoderBackend
+    from kaos_nlp_transformers._rust import reranker as _reranker
 
-    assert isinstance(reranker._backend, CrossEncoderBackend)
+    assert isinstance(reranker._backend, _reranker.CrossEncoderBackend)
 
 
 # -- Rerank contract -------------------------------------------------------

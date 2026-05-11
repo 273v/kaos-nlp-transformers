@@ -27,10 +27,10 @@ def _has_cuda_provider() -> bool:
     reports ``cuda=False``.
     """
     try:
-        from kaos_nlp_transformers._rust.registry import capabilities
+        from kaos_nlp_transformers._rust import registry
     except ImportError:
         return False
-    return bool(capabilities().get("cuda", False))
+    return bool(registry.capabilities().get("cuda", False))
 
 
 def _has_nvidia_gpu() -> bool:

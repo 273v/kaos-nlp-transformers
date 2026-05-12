@@ -7,7 +7,7 @@ and documented. Participation in this project is governed by the
 ## Setup
 
 ```bash
-uv sync --group dev --extra clustering
+uv sync --group dev --extra model2vec
 uvx pre-commit install
 ```
 
@@ -17,7 +17,7 @@ shortens the local feedback loop; CI remains the final gate.
 `kaos-nlp-transformers` requires Python 3.13 or newer. It publishes the
 `kaos_nlp_transformers` import package and the `kaos-nlp-transformers` and
 `kaos-nlp-transformers-serve` CLI entry points.
-Public extras currently declared: `clustering`, `gpu`, `mcp`, `openvino`, `torch`.
+Public extras currently declared: `gpu`, `mcp`, `model2vec`, `openvino`, `torch`.
 
 ## Before Opening A PR
 
@@ -26,8 +26,19 @@ Run the local quality gate:
 ```bash
 uv run ruff format --check kaos_nlp_transformers tests
 uv run ruff check kaos_nlp_transformers tests
+uv run maturin develop --release
 uv run ty check kaos_nlp_transformers tests
 uv run pytest tests/unit -q --no-cov
+```
+
+Rust/PyO3 packages must also run:
+
+```bash
+cargo fmt --check
+cargo clippy --release --lib -- -D warnings
+cargo test --release --lib
+cargo audit
+cargo deny check
 ```
 
 When packaging, metadata, README rendering, or release behavior changes,

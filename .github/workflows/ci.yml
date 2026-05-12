@@ -224,15 +224,18 @@ jobs:
         run: uv python install --preview ${{ matrix.python-version }}
 
       - name: Install dependencies
+        continue-on-error: ${{ matrix.experimental }}
         run: uv sync --group dev --python ${{ matrix.python-version }}
 
       - name: Build PyO3 extension (maturin develop --release)
+        continue-on-error: ${{ matrix.experimental }}
         # KNT-601: the package is hybrid Rust+Python. The cdylib must
         # be compiled and installed into the venv before pytest can
         # import `kaos_nlp_transformers._rust`.
         run: uv run maturin develop --release
 
       - name: Run unit tests with coverage
+        continue-on-error: ${{ matrix.experimental }}
         # `shell: bash` so the multi-line `\` continuations work on
         # Windows runners (default PowerShell parses `\` as a unary
         # operator and errors out). Git Bash is preinstalled on

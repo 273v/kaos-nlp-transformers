@@ -9,6 +9,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.2.0a6] — 2026-05-15
+
+### Changed
+
+- **`SemanticChunker._pack` now routes adjacent-pair cosine through
+  the pre-normalised fast path** in kaos-nlp-core 0.1.0a6+
+  (`cosine_adjacent_normalized` instead of the generic
+  `cosine_adjacent`). The `Embedder` protocol contract — and our
+  canonical `EmbeddingModel` implementation — already guarantee
+  unit-norm rows, so this is a free 1.5–7.4× speedup at every
+  tested chunker shape (measured on Intel i7-12700K AVX2+FMA;
+  cross-CPU envelope tracked in
+  `docs/benchmarks/semantic-chunker-throughput-*.json`).
+- **`ExtractiveRanker.rank` similarly routes cosine through the
+  pre-normalised fast path** (`cosine_one_to_many_normalized`). The
+  query-mode branch is direct; the centroid-mode branch first
+  normalises the centroid in-place via
+  `kaos_nlp_core.similarity.l2_normalize_in_place` because the mean
+  of unit-norm rows is not itself unit-norm.
+- **`Embedder` protocol docstring** explicitly states the unit-norm
+  output contract that the canonical implementation already honours.
+- Bumped `kaos-nlp-core` floor to `>=0.1.0a6` (was `>=0.1.0a5`).
+  0.1.0a6 added the `cosine_*_normalized` and `l2_normalize_in_place`
+  public surface this release consumes.
+
+### Added
+
+- **Throughput benches** at `tests/bench_semantic_chunker.py` and
+  `tests/bench_extraction.py`. Measure end-to-end docs/sec through
+  the full pipeline (embed + cosine + chunk-emit / rank) on the
+  vendored model2vec embedder over USC / EDGAR / patents corpora.
+  Marked `@pytest.mark.slow`; opt-in via `KAOS_NLP_SCALE_FIXTURES`.
+  Honest numbers committed to
+  `docs/benchmarks/semantic-chunker-throughput-*.json` and
+  `extractive-ranker-throughput-*.json`.
+
+### Perf envelope (measured)
+
+Intel i7-12700K, model2vec / potion-base-8M embedder, single-core:
+
+| Workload                                 | docs/sec | p50 ms/doc |
+|------------------------------------------|---------:|-----------:|
+| `SemanticChunker` over EDGAR (40 paras)  |     88.6 |       5.46 |
+| `SemanticChunker` over USC (4 paras)     |    674.2 |       0.76 |
+| `SemanticChunker` over patents (49 paras)|     64.5 |      13.27 |
+| `ExtractiveRanker` centroid + k=10 EDGAR |     88.3 |       6.12 |
+| `ExtractiveRanker` query + k=10 EDGAR    |     85.8 |       5.14 |
+| `ExtractiveRanker` query + MMR (0.5)     |     83.4 |       6.84 |
+| `ExtractiveRanker` centroid + k=20 USC   |    722.7 |       0.62 |
+
+The cosine-dominated phase moved from one of the slower steps to a
+sub-millisecond per-doc contribution; the throughput cap is now the
+embedder inference time, which is exactly the right place for the
+bottleneck to be.
+
+
 ## [0.2.0a5] — 2026-05-15
 
 ### Changed

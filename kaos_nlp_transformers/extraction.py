@@ -26,7 +26,10 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 from kaos_nlp_core.similarity import (
-    cosine_one_to_many as nlp_core_cosine_one_to_many,
+    cosine_one_to_many_normalized as nlp_core_cosine_one_to_many_normalized,
+)
+from kaos_nlp_core.similarity import (
+    l2_normalize_in_place as nlp_core_l2_normalize_in_place,
 )
 from kaos_nlp_core.similarity import (
     mmr_select as nlp_core_mmr_select,
@@ -246,19 +249,25 @@ class ExtractiveRanker:
                 raise ValueError("ExtractiveRanker requires an embedder for non-reranker scoring")
             embeddings = self.embedder.embed(texts)
             embeddings = _to_contiguous_f32(embeddings)
+            # Both branches route through the pre-normalised fast path
+            # (``cosine_one_to_many_normalized``) -- it skips the per-row
+            # ``‖row‖²`` and the rsqrt finalisation when the inputs are
+            # already unit-norm. ``Embedder`` contract guarantees
+            # unit-norm rows for ``embeddings`` and for the query embed;
+            # the centroid is the only intermediate that we have to
+            # L2-normalise ourselves (mean of unit-norm vectors is not
+            # unit-norm).
             if query is not None:
                 query_vec = self.embedder.embed([query])[0]
                 query_vec = _to_contiguous_f32(query_vec)
-                # NumKong-backed Rust path: one SIMD-dispatched cosine
-                # sweep across the whole batch instead of a Python
-                # comprehension. On 1000-row x 768-d this is ~17x
-                # numpy and orders of magnitude faster than per-pair
-                # ``_cosine`` calls.
-                scores = nlp_core_cosine_one_to_many(query_vec, embeddings)
+                scores = nlp_core_cosine_one_to_many_normalized(query_vec, embeddings)
             else:
                 centroid = embeddings.mean(axis=0).astype(np.float32, copy=False)
                 centroid = _to_contiguous_f32(centroid)
-                scores = nlp_core_cosine_one_to_many(centroid, embeddings)
+                # Mean of unit-norm rows is not itself unit-norm; the
+                # fast path requires unit-norm inputs on BOTH sides.
+                nlp_core_l2_normalize_in_place(centroid)
+                scores = nlp_core_cosine_one_to_many_normalized(centroid, embeddings)
 
         # Determine the order. Use MMR when diversify > 0 and we have
         # embeddings; otherwise sort by raw score.

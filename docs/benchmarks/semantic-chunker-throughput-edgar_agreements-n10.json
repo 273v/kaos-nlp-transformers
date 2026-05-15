@@ -1,0 +1,13 @@
+{
+  "n_docs": 10,
+  "elapsed_s": 0.1463,
+  "docs_per_sec": 68.36,
+  "ms_per_doc_p50": 8.831,
+  "ms_per_doc_p95": 55.336,
+  "ms_per_doc_max": 55.336,
+  "total_chunks": 537,
+  "chunks_per_doc_avg": 53.7,
+  "embedder": "model2vec/potion-base-8M",
+  "corpus": "edgar_agreements.jsonl",
+  "granularity": "paragraph"
+}

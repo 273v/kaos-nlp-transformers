@@ -1,0 +1,15 @@
+{
+  "n_docs": 50,
+  "elapsed_s": 0.5996,
+  "docs_per_sec": 83.4,
+  "ms_per_doc_p50": 6.843,
+  "ms_per_doc_p95": 48.533,
+  "ms_per_doc_max": 69.513,
+  "total_spans": 500,
+  "spans_per_doc_avg": 10.0,
+  "embedder": "model2vec/potion-base-8M",
+  "corpus": "edgar_agreements.jsonl",
+  "mode": "query",
+  "k": 10,
+  "diversify": 0.5
+}

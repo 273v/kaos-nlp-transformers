@@ -29,7 +29,9 @@ import numpy as np
 from kaos_nlp_core._rust.chunking import semantic_pack as _rust_semantic_pack
 from kaos_nlp_core.chunking import Chunk, Chunker
 from kaos_nlp_core.segmentation import segment_paragraphs, segment_sentences
-from kaos_nlp_core.similarity import cosine_adjacent as nlp_core_cosine_adjacent
+from kaos_nlp_core.similarity import (
+    cosine_adjacent_normalized as nlp_core_cosine_adjacent_normalized,
+)
 from kaos_nlp_core.types import Segment
 
 
@@ -38,9 +40,16 @@ class Embedder(Protocol):
     """Minimal embedding interface consumed by :class:`SemanticChunker`.
 
     Implementations must return ``(N, dim)`` float arrays from
-    :meth:`embed`. The Rust-backed
+    :meth:`embed`. **Returned rows must be L2-normalised (unit-norm)**
+    — the SemanticChunker hot path routes through
+    :func:`kaos_nlp_core.similarity.cosine_adjacent_normalized`, which
+    skips the per-row norm computation on the contract that the caller
+    pre-normalises. The Rust-backed
     :class:`~kaos_nlp_transformers.EmbeddingModel` is the canonical
-    implementation; tests substitute stubs that match the same shape.
+    implementation and L2-normalises every row via the
+    ``normalize_embeddings`` ONNX path and a defensive ``_l2_normalize``
+    pass; tests substitute stubs that match the same shape and the
+    same contract.
     """
 
     def embed(
@@ -135,10 +144,15 @@ class SemanticChunker(Chunker):
         token_counts: Sequence[int],
     ) -> list[Chunk]:
         # Adjacent-pair cosine similarity through the Rust-backed
-        # ``kaos_nlp_core.similarity.cosine_adjacent`` path. NumKong
-        # dispatches the cosine kernel to AVX-512 / AVX2 / NEON /
-        # scalar at runtime. ``adj_sim[i]`` = cosine(units[i],
-        # units[i+1]); length = n - 1.
+        # ``kaos_nlp_core.similarity.cosine_adjacent_normalized`` -- the
+        # pre-normalised fast path. Skips the per-row norm computation
+        # and the rsqrt finalisation; pure dot + clamp. Safe because the
+        # ``Embedder`` protocol contract (and our canonical
+        # ``EmbeddingModel`` implementation) guarantee unit-norm rows.
+        # The Rust kernel dispatches once (AVX-512F / AVX2+FMA / NEON /
+        # scalar) and runs the full pair loop inside the ISA-specific
+        # path. ``adj_sim[i]`` = cosine(units[i], units[i+1]);
+        # length = n - 1.
         n_units = embeddings.shape[0]
         if n_units >= 2:
             embeddings_f32 = (
@@ -146,7 +160,7 @@ class SemanticChunker(Chunker):
             )
             if not embeddings_f32.flags["C_CONTIGUOUS"]:
                 embeddings_f32 = np.ascontiguousarray(embeddings_f32)
-            adj_sim = nlp_core_cosine_adjacent(embeddings_f32)
+            adj_sim = nlp_core_cosine_adjacent_normalized(embeddings_f32)
         else:
             adj_sim = np.empty(0, dtype=np.float32)
 

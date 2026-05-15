@@ -48,7 +48,12 @@ classifiers = [
 
 dependencies = [
   "kaos-core>=0.1.0a1",
-  "kaos-nlp-core>=0.1.0a1",
+  # 0.1.0a5 introduced kaos_nlp_core.{chunking,similarity} + the
+  # _rust.chunking.semantic_pack kernel that SemanticChunker calls.
+  # (The 0.1.0a4 tag exists but its release run failed at the wheels
+  # matrix and never published to PyPI; 0.1.0a5 is the first PyPI
+  # build containing the new modules.)
+  "kaos-nlp-core>=0.1.0a5",
   "numpy>=2.1",
   # Audit KNT-601 (0.2.0): fastembed removed. Embedding inference now
   # goes through the in-tree Rust cdylib (``_rust.embedding``) which

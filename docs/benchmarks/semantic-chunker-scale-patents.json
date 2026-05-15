@@ -1,0 +1,13 @@
+{
+  "label": "SemanticChunker@Patents",
+  "documents": 50,
+  "chunks": 1793,
+  "elapsed_seconds": 0.803,
+  "docs_per_sec": 62.26,
+  "chunks_per_sec": 2232.8,
+  "exceptions": [],
+  "bad_offset_examples": [],
+  "chunk_token_count_max": 2529,
+  "chunk_token_count_mean": 436.8,
+  "chunks_per_doc_mean": 35.9
+}

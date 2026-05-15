@@ -1,0 +1,15 @@
+{
+  "n_docs": 100,
+  "elapsed_s": 0.1384,
+  "docs_per_sec": 722.7,
+  "ms_per_doc_p50": 0.624,
+  "ms_per_doc_p95": 6.033,
+  "ms_per_doc_max": 13.118,
+  "total_spans": 1546,
+  "spans_per_doc_avg": 15.46,
+  "embedder": "model2vec/potion-base-8M",
+  "corpus": "usc.jsonl",
+  "mode": "centroid",
+  "k": 20,
+  "diversify": 0.0
+}

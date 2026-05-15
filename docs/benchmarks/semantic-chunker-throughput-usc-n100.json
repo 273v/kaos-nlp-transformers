@@ -1,0 +1,13 @@
+{
+  "n_docs": 100,
+  "elapsed_s": 0.1483,
+  "docs_per_sec": 674.16,
+  "ms_per_doc_p50": 0.762,
+  "ms_per_doc_p95": 6.976,
+  "ms_per_doc_max": 13.834,
+  "total_chunks": 398,
+  "chunks_per_doc_avg": 3.98,
+  "embedder": "model2vec/potion-base-8M",
+  "corpus": "usc.jsonl",
+  "granularity": "paragraph"
+}

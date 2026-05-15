@@ -1,0 +1,13 @@
+{
+  "n_docs": 100,
+  "elapsed_s": 1.5509,
+  "docs_per_sec": 64.48,
+  "ms_per_doc_p50": 13.27,
+  "ms_per_doc_p95": 34.294,
+  "ms_per_doc_max": 82.142,
+  "total_chunks": 4901,
+  "chunks_per_doc_avg": 49.01,
+  "embedder": "model2vec/potion-base-8M",
+  "corpus": "patents.jsonl",
+  "granularity": "paragraph"
+}

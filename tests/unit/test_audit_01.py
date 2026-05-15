@@ -182,22 +182,31 @@ def test_top_level_all_passes_isort_check():
     # Audit-02 KNT-104 added RERANKER_EXCLUDED + RERANKER_REGISTRY constants.
     # audit-04 KNT-301..302 added LatentDevice + DeviceNotReachableError
     # for the OS-level GPU latent surface (see device.py / errors.py).
+    # Audit-07 KNT-700/701: SemanticChunker, ExtractiveRanker, and their
+    # protocol/result types added for the long-doc summarization +
+    # extractive-summarization stack defined in
+    # ``kaos-llm-core/docs/summarization-classification-plan.md``.
     expected_groups = {
         "constants": ["EXCLUDED", "REGISTRY", "RERANKER_EXCLUDED", "RERANKER_REGISTRY"],
         "classes": [
             "BackendNotInstalledError",
+            "ChunkerEmbedder",
             "CrossEncoderReranker",
             "DeviceInfo",
             "DeviceNotReachableError",
             "EmbeddingError",
             "EmbeddingModel",
             "EmbeddingRetriever",
+            "ExtractiveRanker",
+            "ExtractiveReranker",
             "KaosNLPTransformersError",
             "KaosNLPTransformersSettings",
             "LatentDevice",
             "ModelLoadError",
             "ModelNotRegisteredError",
             "RegisteredModel",
+            "ScoredSegment",
+            "SemanticChunker",
             "SystemDevices",
         ],
         "dunder": ["__version__"],

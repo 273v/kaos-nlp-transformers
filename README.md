@@ -31,6 +31,29 @@ backend on CPU out of the box. Optional extras layer in adjacencies —
 `[clustering]` for SciPy-backed semantic dedup, and `[mcp]` for the
 MCP tool surface. Free-threaded Python (3.13t / 3.14t) is supported.
 
+## Use, data handling, and authorship disclosure
+
+`kaos-nlp-transformers` runs inference **locally** through the
+bundled Rust cdylib (ONNX Runtime + Rust tokenizers). Once a model
+is downloaded into the local Hugging Face cache, every subsequent
+`.embed(...)` / `.rerank(...)` call stays in-process — no
+network, no provider-side data transmission. Model downloads
+themselves go to the Hugging Face Hub once per `(model_id,
+revision)` pair; pin `KAOS_NLP_TRANSFORMERS_OFFLINE=1` or
+`HF_HUB_OFFLINE=1` to forbid downloads in production. The
+`SemanticChunker` and `ExtractiveRanker` Programs in this package
+inherit the same local-only data path. Downstream consumers
+(notably `kaos-llm-core` Programs) may transmit text to LLM
+providers, so callers handling sensitive data should check the
+consuming package's data-handling disclosure.
+
+This codebase is AI-assisted: substantial portions were generated
+with Claude (Anthropic) and human-reviewed before commit. Public
+behavior is covered by the test suite under `tests/`; live model
+downloads + GPU paths are opt-in (`pytest -m integration` and
+`pytest -m gpu`). Bug reports welcome via GitHub Issues; security
+reports follow [`SECURITY.md`](SECURITY.md).
+
 ## Install
 
 ```bash

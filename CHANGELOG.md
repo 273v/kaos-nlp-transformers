@@ -8,6 +8,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.2.0a5] — 2026-05-15
+
+### Changed
+
+- **`SemanticChunker._pack` now runs entirely in Rust** via
+  ``kaos_nlp_core._rust.chunking.semantic_pack``. The greedy
+  budget+topic-shift boundary scan moved from a Python loop into the
+  Rust kernel; the Python wrapper now only marshals ``uint32`` offset
+  + token arrays in, materialises Chunk objects from the returned
+  group records out, and computes the adjacency cosine via the
+  already-Rust ``cosine_adjacent``. Behaviour is bit-identical to the
+  prior pure-Python loop (24 SemanticChunker tests + 5 scale tests
+  pass unchanged).
+- **`SemanticChunker` and `ExtractiveRanker` now route post-inference
+  cosine + MMR through the Rust-backed
+  :mod:`kaos_nlp_core.similarity` layer** (NumKong SIMD kernels).
+  Previously these used numpy einsum / matmul in Python:
+  - `SemanticChunker._pack` adjacent-pair cosine — now
+    ``kaos_nlp_core.similarity.cosine_adjacent`` (one SIMD-dispatched
+    call instead of a normalize + einsum pair).
+  - `ExtractiveRanker.rank` centroid + query scoring — now
+    ``kaos_nlp_core.similarity.cosine_one_to_many`` (17x numpy on
+    1000-row x 768-d workloads).
+  - `ExtractiveRanker.rank` MMR diversification — now
+    ``kaos_nlp_core.similarity.mmr_select`` (67x numpy on
+    1000-row x 768-d MMR with ``k=20``).
+  - The local ``_cosine`` helper is retained as a no-op
+    backwards-compat stub but is no longer called in the hot path.
+  - Behavior contract: results agree with numpy reference within
+    ``1e-5`` per cell (validated in
+    ``kaos-nlp-core/tests/test_similarity.py`` and the bench grid).
+
+### Documentation
+
+- **Use, data-handling, and AI-authorship disclosure** added to the
+  README. Confirms that inference is local (Rust cdylib + ONNX
+  Runtime; no LLM provider transmission) once the model is cached.
+  Notes that downstream `kaos-llm-core` Programs may transmit text
+  to providers — sensitive-data callers should check that
+  package's disclosure. AI-assisted authorship disclosure (Claude,
+  Anthropic; human-reviewed) added.
+
+### Added
+
+- **`SemanticChunker`** — embedding-driven document chunker that
+  implements the
+  :class:`kaos_nlp_core.chunking.Chunker` protocol. Boundaries are
+  placed where adjacent paragraph (or sentence) embeddings drop in
+  cosine similarity below ``drop_threshold`` or where the running
+  token count exceeds ``max_tokens``. Phase 5 of the cross-module
+  summarization/classification plan.
+- **`ExtractiveRanker`** — sentence-salience ranker with three modes:
+  generic (centroid cosine), query-focused (query embedding cosine),
+  and cross-encoder reranking. MMR diversity supported via the
+  ``diversify`` parameter.
+- **`ScoredSegment`** — frozen+slotted dataclass carrying ``text``,
+  ``start``, ``end``, ``score``, ``rank``.
+- **`ChunkerEmbedder` / `ExtractiveReranker`** — runtime-checkable
+  Protocols defining the minimum interface
+  :class:`SemanticChunker` / :class:`ExtractiveRanker` consume.
+  Stubbing these in tests keeps the unit gate offline and never
+  touches the Rust cdylib.
+- All five new names are re-exported from
+  ``kaos_nlp_transformers`` and listed in ``__all__``.
+- Audit-07 KNT-700/701 extends ``test_audit_01`` to recognize the
+  new public exports.
+
 ## [0.2.0a4] — 2026-05-11
 
 ### Fixed

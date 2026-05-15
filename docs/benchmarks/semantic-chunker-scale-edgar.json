@@ -1,0 +1,13 @@
+{
+  "label": "SemanticChunker@EDGAR",
+  "documents": 50,
+  "chunks": 1497,
+  "elapsed_seconds": 0.594,
+  "docs_per_sec": 84.14,
+  "chunks_per_sec": 2519.0,
+  "exceptions": [],
+  "bad_offset_examples": [],
+  "chunk_token_count_max": 49885,
+  "chunk_token_count_mean": 424.7,
+  "chunks_per_doc_mean": 29.9
+}

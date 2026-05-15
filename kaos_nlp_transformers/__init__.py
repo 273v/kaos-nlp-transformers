@@ -16,6 +16,8 @@ See ``docs/internal/prd/kaos-nlp-transformers.md`` and
 """
 
 from kaos_nlp_transformers._version import __version__
+from kaos_nlp_transformers.chunking import Embedder as ChunkerEmbedder
+from kaos_nlp_transformers.chunking import SemanticChunker
 from kaos_nlp_transformers.device import (
     DeviceInfo,
     LatentDevice,
@@ -30,6 +32,13 @@ from kaos_nlp_transformers.errors import (
     KaosNLPTransformersError,
     ModelLoadError,
     ModelNotRegisteredError,
+)
+from kaos_nlp_transformers.extraction import (
+    ExtractiveRanker,
+    ScoredSegment,
+)
+from kaos_nlp_transformers.extraction import (
+    Reranker as ExtractiveReranker,
 )
 from kaos_nlp_transformers.models import (
     EXCLUDED,
@@ -48,18 +57,23 @@ __all__ = [
     "RERANKER_EXCLUDED",
     "RERANKER_REGISTRY",
     "BackendNotInstalledError",
+    "ChunkerEmbedder",
     "CrossEncoderReranker",
     "DeviceInfo",
     "DeviceNotReachableError",
     "EmbeddingError",
     "EmbeddingModel",
     "EmbeddingRetriever",
+    "ExtractiveRanker",
+    "ExtractiveReranker",
     "KaosNLPTransformersError",
     "KaosNLPTransformersSettings",
     "LatentDevice",
     "ModelLoadError",
     "ModelNotRegisteredError",
     "RegisteredModel",
+    "ScoredSegment",
+    "SemanticChunker",
     "SystemDevices",
     "__version__",
     "detect_devices",

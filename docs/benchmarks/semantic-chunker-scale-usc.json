@@ -1,0 +1,13 @@
+{
+  "label": "SemanticChunker@USC",
+  "documents": 200,
+  "chunks": 628,
+  "elapsed_seconds": 0.637,
+  "docs_per_sec": 313.81,
+  "chunks_per_sec": 985.4,
+  "exceptions": [],
+  "bad_offset_examples": [],
+  "chunk_token_count_max": 13041,
+  "chunk_token_count_mean": 240.0,
+  "chunks_per_doc_mean": 3.1
+}

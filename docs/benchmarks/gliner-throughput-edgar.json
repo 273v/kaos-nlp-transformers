@@ -1,0 +1,33 @@
+{
+  "label": "edgar",
+  "n_docs": 50,
+  "n_entities_total": 594,
+  "threshold": 0.5,
+  "elapsed_s_total": 10.353146656882018,
+  "docs_per_second": 4.8294496018525574,
+  "per_call_ms_mean": 207.06293313764036,
+  "per_call_ms_p50": 204.9796322826296,
+  "per_call_ms_p95": 274.4225802598521,
+  "per_call_ms_max": 353.1827456317842,
+  "entities_per_doc_mean": 11.88,
+  "entities_per_doc_max": 35,
+  "zero_entity_docs": 0,
+  "label_distribution": {
+    "date": 78,
+    "company": 158,
+    "jurisdiction": 81,
+    "party": 170,
+    "person": 76,
+    "monetary amount": 31
+  },
+  "n_invalid_entities": 0,
+  "invalid_entity_samples": [],
+  "labels": [
+    "person",
+    "company",
+    "monetary amount",
+    "date",
+    "jurisdiction",
+    "party"
+  ]
+}

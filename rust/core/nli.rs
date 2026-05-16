@@ -1,16 +1,28 @@
-//! Cross-encoder reranker — sigmoid-normalized [0, 1] relevance
-//! scoring for (query, passage) pairs.
+//! NLI (natural language inference) cross-encoder — softmax-normalized
+//! three-class probabilities over (entailment, neutral, contradiction)
+//! for ``(premise, hypothesis)`` pairs.
 //!
-//! Distinct from embedding inference: cross-encoders concatenate the
-//! query and passage with [SEP] tokens, run BERT, and read a single
-//! logit off a classifier head. The output is a relevance score, not
-//! a vector. Audit-06 KNT-501 retired the sentence-transformers path
-//! for this task; KNT-601 ports it from Python ``fastembed.TextCrossEncoder``
-//! to a direct Rust+ort implementation here.
+//! Mechanically identical to the cross-encoder reranker
+//! (``core::reranker``): tokenizer ``encode_pair`` produces the same
+//! ``(input_ids, attention_mask, token_type_ids)`` shapes, ort's
+//! ``Session::run`` returns the same ``"logits"`` output name. The
+//! only differences are:
 //!
-//! Sigmoid normalization centralizes here so the Python side
-//! (``reranker.py``) becomes a thin async-thread dispatch wrapper
-//! with no math.
+//! 1. The logits tensor has shape ``(batch, 3)`` instead of
+//!    ``(batch, 1)`` — three-class head instead of single-relevance.
+//! 2. We softmax along axis 1 instead of sigmoid on column 0.
+//! 3. We **re-order** the three-class output from the model's
+//!    ``id2label`` permutation into the canonical
+//!    ``(entailment, neutral, contradiction)`` tuple expected by the
+//!    ``NLIScorer`` protocol on the kaos-llm-core side. The default
+//!    registered model ``Xenova/nli-deberta-v3-base`` declares
+//!    ``id2label = {0: contradiction, 1: entailment, 2: neutral}``;
+//!    we hardcode that permutation here.
+//!
+//! When a second NLI checkpoint lands, the canonical fix is to read
+//! the model's ``config.json`` at load time and build the permutation
+//! dynamically — see the inline ``// TODO`` below. For 0.2.0a7 we
+//! hardcode the one model we serve.
 
 use crate::core::device::Device;
 use crate::core::error::{BackendError, Result};
@@ -23,36 +35,48 @@ use ort::value::TensorRef;
 use std::path::Path;
 use std::sync::Mutex;
 
-/// Cross-encoder reranker. Holds an ort Session loaded against a
-/// classification-head BERT model.
-pub trait CrossEncoder: Send + Sync {
-    /// Score a batch of (query, passage) pairs. Returns sigmoid-
-    /// normalized scores in [0, 1], one per pair.
-    fn score_pairs(&self, pairs: &[(&str, &str)], batch_size: usize) -> Result<Vec<f32>>;
+/// NLI three-class probability triple. Canonical order:
+/// ``(entailment, neutral, contradiction)`` regardless of how the
+/// underlying ONNX checkpoint permuted its head. Matches the
+/// ``NLIScore`` Protocol fields in
+/// ``kaos_llm_core.programs.classify.nli``.
+pub type NliProbs = [f32; 3];
 
-    /// HF Hub model id this reranker was loaded for.
+/// NLI cross-encoder backend trait.
+pub trait NliClassifier: Send + Sync {
+    /// Score a batch of (premise, hypothesis) pairs. Returns
+    /// softmax-normalized three-class probabilities, in the canonical
+    /// (entailment, neutral, contradiction) order, one triple per pair.
+    fn score_pairs(&self, pairs: &[(&str, &str)], batch_size: usize) -> Result<Vec<NliProbs>>;
+
+    /// HF Hub model id this classifier was loaded for.
     fn model_id(&self) -> &str;
 
-    /// Device this reranker runs on.
+    /// Device this classifier runs on.
     fn device(&self) -> &str;
 }
 
-/// ort-backed cross-encoder.
-pub struct OrtCrossEncoder {
+/// ort-backed NLI cross-encoder.
+pub struct OrtNliClassifier {
     session: Mutex<Session>,
     tokenizer: TokenizerWrapper,
     model_id: String,
     device_str: String,
     /// True iff the loaded ONNX accepts a ``token_type_ids`` input.
-    /// Some BERT-family exports omit it (the model embeds zero
-    /// segment ids internally); supplying it then triggers an
-    /// "Invalid input name" error from ort. See test
-    /// ``bge_reranker_smoke`` for the regression that motivated this.
+    /// Same probe pattern as ``core::reranker::OrtCrossEncoder``.
     accepts_token_type_ids: bool,
+    /// Permutation array. ``[i]`` is the column index in the raw ONNX
+    /// logits that holds the i-th canonical class
+    /// (0=entailment, 1=neutral, 2=contradiction).
+    ///
+    /// For ``Xenova/nli-deberta-v3-base`` (id2label =
+    /// {0: contradiction, 1: entailment, 2: neutral}):
+    /// permutation = [1, 2, 0].
+    canonical_perm: [usize; 3],
 }
 
-impl OrtCrossEncoder {
-    /// Load a cross-encoder model (e.g. BAAI/bge-reranker-base).
+impl OrtNliClassifier {
+    /// Load an NLI cross-encoder model (e.g. Xenova/nli-deberta-v3-base).
     pub fn load(
         model: &RegisteredModel,
         device: &Device,
@@ -60,8 +84,6 @@ impl OrtCrossEncoder {
     ) -> Result<Self> {
         let ModelPaths { onnx, tokenizer } = resolve_paths(model, cache_dir)?;
 
-        // Build session — same shape as embedding path; cross-encoder
-        // op coverage is identical (BERT + Linear classifier head).
         let builder = Session::builder()
             .map_err(|e| {
                 BackendError::model_load(
@@ -79,8 +101,11 @@ impl OrtCrossEncoder {
                 )
             })?;
 
-        // KNT-NLI-002 (2026-05-16): saturate intra-op threads.
-        // See rust/core/ner.rs for diagnostic numbers.
+        // KNT-NLI-002 (2026-05-16): saturate the intra-op thread
+        // pool to ``available_parallelism()``. ort's default sized
+        // to ~25% of cores on a 20-core host; explicit setting
+        // roughly halves per-call latency. See rust/core/ner.rs for
+        // the diagnostic numbers behind this change.
         let builder = configure_intra_threads(builder, model)?;
 
         let mut builder = configure_eps(builder, device, model)?;
@@ -93,8 +118,6 @@ impl OrtCrossEncoder {
             )
         })?;
 
-        // Probe inputs once at load time so we know whether to pass
-        // token_type_ids per request.
         let accepts_token_type_ids = session
             .inputs()
             .iter()
@@ -102,12 +125,36 @@ impl OrtCrossEncoder {
 
         let tok = TokenizerWrapper::from_file(&tokenizer, model.max_seq_len)?;
 
+        // TODO: when a second NLI checkpoint lands, read config.json
+        // ``id2label`` at load time and derive ``canonical_perm``
+        // dynamically. For 0.2.0a7 we serve a single model whose
+        // permutation is fixed.
+        let canonical_perm = match model.model_id {
+            "Xenova/nli-deberta-v3-base" => {
+                // id2label = {0: contradiction, 1: entailment, 2: neutral}
+                // canonical = (entailment, neutral, contradiction)
+                //           = (col 1,    col 2,   col 0)
+                [1, 2, 0]
+            }
+            other => {
+                return Err(BackendError::model_load(
+                    other,
+                    model.revision,
+                    "no hardcoded canonical permutation for this NLI model; \
+                     add an entry to OrtNliClassifier::load() and re-confirm \
+                     id2label from the model's config.json"
+                        .to_string(),
+                ));
+            }
+        };
+
         Ok(Self {
             session: Mutex::new(session),
             tokenizer: tok,
             model_id: model.model_id.to_string(),
             device_str: device.as_str(),
             accepts_token_type_ids,
+            canonical_perm,
         })
     }
 }
@@ -184,33 +231,35 @@ fn configure_eps(
     }
 }
 
+/// Stable softmax over a single row.
 #[inline]
-fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
+fn softmax_row(row: &[f32]) -> [f32; 3] {
+    debug_assert_eq!(row.len(), 3);
+    let max = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let e0 = (row[0] - max).exp();
+    let e1 = (row[1] - max).exp();
+    let e2 = (row[2] - max).exp();
+    let sum = e0 + e1 + e2;
+    [e0 / sum, e1 / sum, e2 / sum]
 }
 
-impl CrossEncoder for OrtCrossEncoder {
-    fn score_pairs(&self, pairs: &[(&str, &str)], batch_size: usize) -> Result<Vec<f32>> {
+impl NliClassifier for OrtNliClassifier {
+    fn score_pairs(&self, pairs: &[(&str, &str)], batch_size: usize) -> Result<Vec<NliProbs>> {
         if pairs.is_empty() {
             return Ok(Vec::new());
         }
 
         let n = pairs.len();
-        let mut scores: Vec<f32> = Vec::with_capacity(n);
+        let mut scores: Vec<NliProbs> = Vec::with_capacity(n);
 
         for chunk in pairs.chunks(batch_size.max(1)) {
-            // Tokenize each pair and stack to a fixed (bs, seq_len)
-            // matrix. Pair tokenization gives non-zero token_type_ids
-            // for the passage segment — different from embedding path
-            // where everything is zero.
             let bs = chunk.len();
             let mut per_row_ids: Vec<Vec<i64>> = Vec::with_capacity(bs);
             let mut per_row_mask: Vec<Vec<i64>> = Vec::with_capacity(bs);
             let mut per_row_types: Vec<Vec<i64>> = Vec::with_capacity(bs);
             let mut max_seq = 0usize;
-            for (q, p) in chunk {
-                let enc = self.tokenizer.encode_pair(q, p)?;
-                // encode_pair returns batch_size=1; take row 0.
+            for (premise, hypothesis) in chunk {
+                let enc = self.tokenizer.encode_pair(premise, hypothesis)?;
                 let ids = enc.input_ids.into_iter().next().unwrap_or_default();
                 let mask = enc.attention_mask.into_iter().next().unwrap_or_default();
                 let tids = enc.token_type_ids.into_iter().next().unwrap_or_default();
@@ -220,7 +269,6 @@ impl CrossEncoder for OrtCrossEncoder {
                 per_row_types.push(tids);
             }
 
-            // Pad each row to max_seq with pad_id / mask=0 / token_type=0.
             let pad_id = self.tokenizer.pad_id as i64;
             for row in per_row_ids.iter_mut() {
                 row.resize(max_seq, pad_id);
@@ -232,7 +280,6 @@ impl CrossEncoder for OrtCrossEncoder {
                 row.resize(max_seq, 0);
             }
 
-            // Flatten.
             let mut flat_ids: Vec<i64> = Vec::with_capacity(bs * max_seq);
             let mut flat_mask: Vec<i64> = Vec::with_capacity(bs * max_seq);
             let mut flat_types: Vec<i64> = Vec::with_capacity(bs * max_seq);
@@ -249,18 +296,14 @@ impl CrossEncoder for OrtCrossEncoder {
             let shape = [bs as i64, max_seq as i64];
             let input_ids_tensor =
                 TensorRef::from_array_view((shape.as_slice(), flat_ids.as_slice()))
-                    .map_err(|e| BackendError::inference(format!("rerank input_ids: {e}")))?;
+                    .map_err(|e| BackendError::inference(format!("nli input_ids: {e}")))?;
             let attention_mask_tensor =
                 TensorRef::from_array_view((shape.as_slice(), flat_mask.as_slice()))
-                    .map_err(|e| BackendError::inference(format!("rerank attention_mask: {e}")))?;
+                    .map_err(|e| BackendError::inference(format!("nli attention_mask: {e}")))?;
             let token_type_ids_tensor =
                 TensorRef::from_array_view((shape.as_slice(), flat_types.as_slice()))
-                    .map_err(|e| BackendError::inference(format!("rerank token_type_ids: {e}")))?;
+                    .map_err(|e| BackendError::inference(format!("nli token_type_ids: {e}")))?;
 
-            // Build the input map. Some BERT-family ONNX cross-encoder
-            // exports omit token_type_ids; passing it would trigger
-            // "Invalid input name" from ort. The accepts_token_type_ids
-            // flag was probed at load time.
             let inputs = if self.accepts_token_type_ids {
                 ort::inputs![
                     "input_ids" => input_ids_tensor,
@@ -268,15 +311,13 @@ impl CrossEncoder for OrtCrossEncoder {
                     "token_type_ids" => token_type_ids_tensor,
                 ]
             } else {
-                let _ = token_type_ids_tensor; // computed but unused for this model
+                let _ = token_type_ids_tensor;
                 ort::inputs![
                     "input_ids" => input_ids_tensor,
                     "attention_mask" => attention_mask_tensor,
                 ]
             };
 
-            // BAAI/bge-reranker-base ONNX export names its single-logit
-            // output "logits" (shape (bs, 1)).
             let (logits_data, logits_shape) = {
                 let mut session = self
                     .session
@@ -284,13 +325,12 @@ impl CrossEncoder for OrtCrossEncoder {
                     .map_err(|e| BackendError::inference(format!("session mutex: {e}")))?;
                 let outputs = session
                     .run(inputs)
-                    .map_err(|e| BackendError::inference(format!("rerank Session::run: {e}")))?;
+                    .map_err(|e| BackendError::inference(format!("nli Session::run: {e}")))?;
 
                 let logits = outputs.get("logits").ok_or_else(|| {
                     BackendError::inference(
-                        "ONNX cross-encoder has no 'logits' output — \
-                         BAAI/bge-reranker-base ONNX must expose a 'logits' \
-                         tensor of shape (batch, 1)."
+                        "ONNX NLI classifier has no 'logits' output — \
+                         expected a 'logits' tensor of shape (batch, 3)."
                             .to_string(),
                     )
                 })?;
@@ -302,27 +342,22 @@ impl CrossEncoder for OrtCrossEncoder {
                 (slice.to_vec(), shape.to_vec())
             };
 
-            // Cross-encoder logits are (bs, 1) for BAAI/bge-reranker-base.
-            // Some exports give (bs,) instead — handle both.
-            let arr = match logits_shape.len() {
-                1 => Array2::from_shape_vec((bs, 1), logits_data)
-                    .map_err(|e| BackendError::inference(format!("logits 1D reshape: {e}")))?,
-                2 => Array2::from_shape_vec(
-                    (logits_shape[0] as usize, logits_shape[1] as usize),
-                    logits_data,
-                )
-                .map_err(|e| BackendError::inference(format!("logits 2D reshape: {e}")))?,
-                _ => {
-                    return Err(BackendError::inference(format!(
-                        "unexpected logits shape {:?}",
-                        logits_shape
-                    )))
-                }
-            };
+            if logits_shape.len() != 2 || logits_shape[1] != 3 {
+                return Err(BackendError::inference(format!(
+                    "expected NLI logits shape (batch, 3), got {:?}",
+                    logits_shape
+                )));
+            }
+            let arr = Array2::from_shape_vec(
+                (logits_shape[0] as usize, logits_shape[1] as usize),
+                logits_data,
+            )
+            .map_err(|e| BackendError::inference(format!("logits reshape: {e}")))?;
 
-            // Take the first column (single relevance logit) and apply sigmoid.
+            let perm = self.canonical_perm;
             for row in arr.outer_iter() {
-                scores.push(sigmoid(row[0]));
+                let raw = softmax_row(row.as_slice().unwrap_or(&[0.0, 0.0, 0.0]));
+                scores.push([raw[perm[0]], raw[perm[1]], raw[perm[2]]]);
             }
         }
 
@@ -341,40 +376,61 @@ impl CrossEncoder for OrtCrossEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::model_registry::lookup_reranker;
+    use crate::core::model_registry::lookup_nli;
 
     #[test]
-    fn sigmoid_endpoints() {
-        assert!((sigmoid(0.0) - 0.5).abs() < 1e-6);
-        assert!(sigmoid(20.0) > 0.99);
-        assert!(sigmoid(-20.0) < 0.01);
+    fn softmax_row_sums_to_one() {
+        let s = softmax_row(&[1.0, 2.0, 3.0]);
+        let total: f32 = s.iter().sum();
+        assert!((total - 1.0).abs() < 1e-6);
+        // Monotone — bigger logit => bigger prob.
+        assert!(s[2] > s[1] && s[1] > s[0]);
     }
 
-    /// Live smoke for BAAI/bge-reranker-base. Requires network or a
-    /// populated cache. Run with: `cargo test --release -- --ignored bge_reranker_smoke`
     #[test]
-    #[ignore = "requires network or cached BAAI/bge-reranker-base weights"]
-    fn bge_reranker_smoke() {
-        let model = lookup_reranker("BAAI/bge-reranker-base").expect("registered");
-        let backend = OrtCrossEncoder::load(model, &Device::Cpu, None).expect("load");
+    fn softmax_row_endpoints() {
+        // Heavy peak on column 1: ~1.0 prob there, near-zero elsewhere.
+        let s = softmax_row(&[-50.0, 0.0, -50.0]);
+        assert!(s[1] > 0.999);
+        assert!(s[0] < 1e-3);
+        assert!(s[2] < 1e-3);
+    }
 
-        // Semantic test: query about birds should score "robins are birds"
-        // higher than "the moon is far".
-        let query = "What is a robin?";
+    /// Live smoke for Xenova/nli-deberta-v3-base. Requires network or a
+    /// populated cache. Run with:
+    ///   cargo test --release -- --ignored nli_deberta_smoke
+    #[test]
+    #[ignore = "requires network or cached Xenova/nli-deberta-v3-base weights"]
+    fn nli_deberta_smoke() {
+        let model = lookup_nli("Xenova/nli-deberta-v3-base").expect("registered");
+        let backend = OrtNliClassifier::load(model, &Device::Cpu, None).expect("load");
+
+        let premise = "A man inspects the uniform of a figure in some East Asian country.";
         let pairs: &[(&str, &str)] = &[
-            (query, "Robins are small songbirds."),
-            (query, "The moon is approximately 384,400 km from Earth."),
+            // Classic SNLI/MNLI evaluation triples.
+            (premise, "The man is sleeping."), // contradiction
+            (premise, "A man is checking a uniform."), // entailment-ish
+            (premise, "The man is outdoors."), // neutral-ish
         ];
 
-        let scores = backend.score_pairs(pairs, 2).expect("score");
-        assert_eq!(scores.len(), 2);
-        for &s in &scores {
-            assert!((0.0..=1.0).contains(&s), "score {s} out of [0,1]");
+        let scores = backend.score_pairs(pairs, 3).expect("score");
+        assert_eq!(scores.len(), 3);
+        for s in &scores {
+            let total: f32 = s.iter().sum();
+            assert!(
+                (total - 1.0).abs() < 1e-3,
+                "probs should sum to ~1, got {:?}",
+                s
+            );
+            for &v in s.iter() {
+                assert!((0.0..=1.0).contains(&v), "prob {v} out of [0,1]");
+            }
         }
+        // Pair 0 should be heavy on contradiction (canonical index 2).
         assert!(
-            scores[0] > scores[1],
-            "expected birds-passage to outscore moon-passage: {:?}",
-            scores
+            scores[0][2] > scores[0][0],
+            "expected pair 0 to favour contradiction over entailment: {:?}",
+            scores[0]
         );
     }
 }

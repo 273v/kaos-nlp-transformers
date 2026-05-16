@@ -38,6 +38,25 @@ class KaosNLPTransformersSettings(ModuleSettings):
     ``CrossEncoderReranker.load()``. Same single-source-of-truth pattern as
     ``default_model``: change this and every internal default updates."""
 
+    default_nli_model: str = "Xenova/nli-deberta-v3-base"
+    """Default NLI (natural language inference) cross-encoder loaded by
+    ``NliModel.load()``. Same single-source-of-truth pattern as
+    ``default_model`` / ``default_reranker_model``. Must be present in
+    ``NLI_REGISTRY`` (or ``allow_unregistered`` must be true)."""
+
+    default_ner_model: str = "onnx-community/gliner_medium-v2.1"
+    """Default GLiNER (zero-shot NER) extractor loaded by
+    ``GLiNERExtractor.load()``. Same single-source-of-truth pattern.
+    Must be present in ``NER_REGISTRY`` (or ``allow_unregistered``
+    must be true)."""
+
+    default_pii_model: str = "onnx-community/bert-small-pii-detection-ONNX"
+    """Default PII (closed-label BERT token-classifier) loaded by
+    ``PiiDetector.load()``. Must be present in ``PII_REGISTRY`` (or
+    ``allow_unregistered`` must be true). Complements GLiNER —
+    GLiNER is zero-shot over caller-supplied labels, PII is fast
+    closed-label over the 24 categories the model was trained on."""
+
     cache_dir: Path | None = None
     offline: bool = False
     allow_unregistered: bool = False

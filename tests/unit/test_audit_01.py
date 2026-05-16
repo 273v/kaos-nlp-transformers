@@ -187,7 +187,18 @@ def test_top_level_all_passes_isort_check():
     # extractive-summarization stack defined in
     # ``kaos-llm-core/docs/summarization-classification-plan.md``.
     expected_groups = {
-        "constants": ["EXCLUDED", "REGISTRY", "RERANKER_EXCLUDED", "RERANKER_REGISTRY"],
+        "constants": [
+            "EXCLUDED",
+            "NER_EXCLUDED",
+            "NER_REGISTRY",
+            "NLI_EXCLUDED",
+            "NLI_REGISTRY",
+            "PII_EXCLUDED",
+            "PII_REGISTRY",
+            "REGISTRY",
+            "RERANKER_EXCLUDED",
+            "RERANKER_REGISTRY",
+        ],
         "classes": [
             "BackendNotInstalledError",
             "ChunkerEmbedder",
@@ -197,13 +208,18 @@ def test_top_level_all_passes_isort_check():
             "EmbeddingError",
             "EmbeddingModel",
             "EmbeddingRetriever",
+            "Entity",
             "ExtractiveRanker",
             "ExtractiveReranker",
+            "GLiNERExtractor",
             "KaosNLPTransformersError",
             "KaosNLPTransformersSettings",
             "LatentDevice",
             "ModelLoadError",
             "ModelNotRegisteredError",
+            "NliModel",
+            "NliScore",
+            "PiiDetector",
             "RegisteredModel",
             "ScoredSegment",
             "SemanticChunker",

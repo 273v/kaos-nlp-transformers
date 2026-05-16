@@ -1,0 +1,28 @@
+{
+  "label": "edgar",
+  "n_docs": 50,
+  "n_pairs_total": 250,
+  "elapsed_s_total": 34.44605086138472,
+  "docs_per_second": 1.451545206189422,
+  "pairs_per_second": 7.25772603094711,
+  "per_call_ms_mean": 688.9210172276944,
+  "per_call_ms_p50": 678.9342239499092,
+  "per_call_ms_p95": 887.7107153413817,
+  "per_call_ms_max": 1330.323753412813,
+  "argmax_distribution": {
+    "This is an employment agreement.": 11,
+    "This is a non-disclosure or confidentiality agreement.": 5,
+    "This is a credit or loan agreement.": 7,
+    "This is a merger or acquisition agreement.": 22,
+    "This is a stock purchase agreement.": 5
+  },
+  "n_invalid_probs": 0,
+  "invalid_prob_samples": [],
+  "hypotheses": [
+    "This is an employment agreement.",
+    "This is a credit or loan agreement.",
+    "This is a stock purchase agreement.",
+    "This is a non-disclosure or confidentiality agreement.",
+    "This is a merger or acquisition agreement."
+  ]
+}

@@ -78,8 +78,11 @@ fn kaos_nlp_transformers_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResu
     // Submodules will be wired up in P3.4. The skeleton below is what
     // ships in P1; concrete bindings land progressively across Phase 3.
     bindings::embedding::register_module(m)?;
+    bindings::ner::register_module(m)?;
+    bindings::nli::register_module(m)?;
     bindings::reranker::register_module(m)?;
     bindings::registry::register_module(m)?;
+    bindings::token_classify::register_module(m)?;
     bindings::tokenize::register_module(m)?;
 
     // Set __path__ so Python treats this as a package (needed for

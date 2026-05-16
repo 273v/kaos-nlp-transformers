@@ -72,6 +72,10 @@ impl OrtBackend {
                 )
             })?;
 
+        // KNT-NLI-002 (2026-05-16): saturate intra-op threads.
+        // See rust/core/ner.rs for diagnostic numbers.
+        let builder = configure_intra_threads(builder, model)?;
+
         // 3. Configure execution providers per device.
         let mut builder = configure_eps(builder, device, model)?;
 
@@ -101,6 +105,28 @@ impl OrtBackend {
 
 /// Configure ort EPs for a session builder. CPU is the default; CUDA
 /// and OpenVINO require feature flags.
+/// See ``rust/core/ner.rs::configure_intra_threads`` for rationale —
+/// duplicated locally so each backend file stays self-contained.
+fn configure_intra_threads(
+    builder: ort::session::builder::SessionBuilder,
+    model: &RegisteredModel,
+) -> Result<ort::session::builder::SessionBuilder> {
+    let override_n: Option<usize> = std::env::var("KAOS_NLP_TRANSFORMERS_INTRA_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0);
+    match override_n {
+        None => Ok(builder),
+        Some(n) => builder.with_intra_threads(n).map_err(|e| {
+            BackendError::model_load(
+                model.model_id,
+                model.revision,
+                format!("with_intra_threads({n}): {e}"),
+            )
+        }),
+    }
+}
+
 fn configure_eps(
     builder: ort::session::builder::SessionBuilder,
     device: &Device,

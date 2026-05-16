@@ -25,9 +25,10 @@ def test_rust_module_imports():
 
 
 def test_rust_submodules_present():
-    from kaos_nlp_transformers._rust import embedding, registry, reranker, tokenize
+    from kaos_nlp_transformers._rust import embedding, nli, registry, reranker, tokenize
 
     assert embedding.EmbeddingBackend is not None
+    assert nli.NliBackend is not None
     assert reranker.CrossEncoderBackend is not None
     assert tokenize.Tokenizer is not None
     assert callable(registry.capabilities)

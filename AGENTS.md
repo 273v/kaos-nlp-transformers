@@ -29,10 +29,28 @@ duplicating their contents:
 - Runtime: Python 3.13+ (free-threaded 3.13t / 3.14t supported)
 - Package type: hybrid Rust + Python via PyO3 / maturin. abi3-py313
   wheels per OS/arch.
-- Primary surface: `EmbeddingModel.load` + `.embed` (dense embeddings),
-  `CrossEncoderReranker.load` + `.rerank`, `detect_devices()`,
-  `KaosNLPTransformersSettings`, and the curated model `REGISTRY` /
-  `EXCLUDED` / `RERANKER_REGISTRY` / `RERANKER_EXCLUDED` catalog.
+- Primary surface (Phase-5 retrieval stack):
+  `EmbeddingModel.load` + `.embed` (dense embeddings),
+  `CrossEncoderReranker.load` + `.rerank`, `EmbeddingRetriever`,
+  `SemanticChunker`, `ExtractiveRanker`.
+- Primary surface (Phase-8 small-model inference):
+  `NliModel.load` + `.score(premise, hypotheses)` (NLI cross-encoder,
+  satisfies `kaos_llm_core.programs.classify.NLIScorer` Protocol);
+  `GLiNERExtractor.load` + `.extract(texts, labels)` (zero-shot NER
+  via prompt-based span scoring); `PiiDetector.load` + `.detect(texts)`
+  (closed-label BERT-small token classifier over 24 PII categories,
+  ~17x faster than GLiNER at the closed-label task). All three share
+  the `Entity` dataclass for span output.
+- Shared admin surface: `detect_devices()`, `KaosNLPTransformersSettings`,
+  and the curated model registries — `REGISTRY` / `EXCLUDED` (embedding),
+  `RERANKER_REGISTRY` / `RERANKER_EXCLUDED`, `NLI_REGISTRY` /
+  `NLI_EXCLUDED`, `NER_REGISTRY` / `NER_EXCLUDED`, `PII_REGISTRY` /
+  `PII_EXCLUDED`.
+- CLI surface: `kaos-nlp-transformers info` (diagnostic envelope),
+  `kaos-nlp-transformers prefetch` (cache-warming with
+  `--include {embedding,reranker,nli,ner,pii}` / `--model <id>` /
+  `--dry-run` / `--json` / `--quiet`),
+  `kaos-nlp-transformers-serve` (MCP server, requires `[mcp]`).
 
 Runtime shape (KNT-601, 0.2.0+): embedding and cross-encoder inference
 goes through an in-tree Rust cdylib
@@ -162,14 +180,16 @@ cache writes.
 - Keep the model registry license-reviewed and revision-pinned. Never
   add a model with revision `main`; use a concrete commit SHA and a
   compatible license.
-- Respect `REGISTRY`, `RERANKER_REGISTRY`, `EXCLUDED`, and
-  `RERANKER_EXCLUDED`. Do not bypass exclusion checks to make
+- Respect every registry's exclusion list: `REGISTRY` / `EXCLUDED`
+  (embedding), `RERANKER_REGISTRY` / `RERANKER_EXCLUDED`,
+  `NLI_REGISTRY` / `NLI_EXCLUDED`, `NER_REGISTRY` / `NER_EXCLUDED`,
+  `PII_REGISTRY` / `PII_EXCLUDED`. Do not bypass exclusion checks to make
   examples or tests pass.
-- Keep embedding and reranking APIs stable: `EmbeddingModel.load`,
-  `EmbeddingModel.embed`, `EmbeddingModel.count_tokens`,
-  `EmbeddingModel.max_seq_len`, `CrossEncoderReranker.load`,
-  `CrossEncoderReranker.rerank`, `KaosNLPTransformersSettings`, and
-  `detect_devices` are user-facing. `EmbeddingRetriever` is
+- Keep all inference APIs stable: `EmbeddingModel.{load,embed,count_tokens,max_seq_len}`,
+  `CrossEncoderReranker.{load,rerank}`, `NliModel.{load,score}`,
+  `GLiNERExtractor.{load,extract}`, `PiiDetector.{load,detect,labels}`,
+  `KaosNLPTransformersSettings`, and `detect_devices` are user-facing.
+  `EmbeddingRetriever` is
   deprecated as of 0.2.0 (DeprecationWarning at construction) and
   scheduled for removal in 0.3.0; downstream callers should migrate
   to `kaos_content.indexing.SearchableDocument` /

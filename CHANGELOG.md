@@ -9,6 +9,156 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.2.0a8] — 2026-05-16
+
+Consolidates the work originally drafted for an in-flight 0.2.0a7 (NLI +
+GLiNER + threading + Phase-8 scale/quality benchmarks, dated
+2026-05-15) with the additional PII / MCP / prefetch work dated
+2026-05-16. The intermediate 0.2.0a7 version was never published to
+PyPI; releasing as a single a8 keeps the published-version history
+contiguous with a6.
+
+### Added
+
+- **`PiiDetector` — closed-label PII detection** (`kaos_nlp_transformers.pii`).
+  BERT-style token classifier complementing `GLiNERExtractor` for
+  the standard PII redaction / compliance workflow. Default model:
+  `onnx-community/bert-small-pii-detection-ONNX` (Apache-2.0 chain
+  via upstream `gravitee-io/bert-small-pii-detection`; 28M params;
+  27 MB int8 ONNX). Trained on `beki/privy` +
+  `gretelai/synthetic_pii_finance_multilingual` + CoNLL-2003.
+  Surfaces 24 PII categories (PERSON, EMAIL_ADDRESS, PHONE_NUMBER,
+  CREDIT_CARD, US_SSN, US_ITIN, IBAN_CODE, FINANCIAL, …) with
+  char-offset spans. Roughly 10× faster than running GLiNER
+  zero-shot for the same closed-label set.
+- **Shared `Entity` dataclass** — `PiiDetector.detect()` returns the
+  same `Entity` shape as `GLiNERExtractor.extract()` so downstream
+  redaction pipelines / `kaos_llm_core.programs.ner.GLiNERExtract`
+  consume both extractors interchangeably.
+- **`rust/core/token_classify.rs`** — new BERT-style token-classifier
+  module (third inference pattern after NLI sentence-pair softmax,
+  reranker sentence-pair sigmoid, GLiNER prompt-span). Tokenize with
+  HuggingFace offset tracking → ort session → softmax-argmax per
+  token → BIO decode → char offsets. Reads `id2label` from
+  `config.json` at load time (fetched via hf-hub alongside
+  ONNX + tokenizer). Output spans share `core::ner::Entity`.
+- **`PII_REGISTRY` + `PII_EXCLUDED`** in `kaos_nlp_transformers.models`,
+  pinning `onnx-community/bert-small-pii-detection-ONNX` and
+  excluding `urchade/gliner_multi_pii-v1` (CC-BY-NC) +
+  `ai4privacy/pii-masking-200k` (research-only training data).
+- **Settings**: `default_pii_model` field on
+  `KaosNLPTransformersSettings`, overridable via
+  `KAOS_NLP_TRANSFORMERS_DEFAULT_PII_MODEL`.
+- **CLI**: `kaos-nlp-transformers prefetch --include pii` and
+  `kaos-nlp-transformers info` now show the PII registry; the
+  `--include {embedding,reranker,nli,ner,pii}` enum gains the
+  fifth member.
+- **Live integration tests**: 10 tests in
+  `tests/integration/test_pii_live.py` covering offset round-trip
+  on multibyte text, 24-category label exposure, financial PII
+  detection (SSN, credit card), batch independence.
+- **Unit tests**: 10 tests in `tests/unit/test_pii.py` covering
+  registry gating, threshold validation, `Entity` shape parity
+  with GLiNER.
+
+
+- **`NliModel` — natural-language-inference cross-encoder** (`kaos_nlp_transformers.nli`).
+  Lands the Phase-8 lower half from
+  `kaos-llm-core/docs/summarization-classification-plan.md` §4.2.3.
+  Default model: `Xenova/nli-deberta-v3-base` (Apache-2.0 chain via
+  upstream `cross-encoder/nli-deberta-v3-base`; 184M params; 244 MB
+  `onnx/model_quantized.onnx`). Returns softmax-normalized
+  three-class probabilities in the canonical
+  `(entailment, neutral, contradiction)` order — `NliModel`
+  satisfies `kaos_llm_core.programs.classify.nli.NLIScorer` at
+  runtime so `ZeroShotNLIClassifier` is a drop-in consumer. The
+  Rust core hard-codes the `id2label` permutation for the registered
+  model; a future second model lands the dynamic `config.json`
+  parse.
+- **`GLiNERExtractor` — zero-shot NER via span extraction**
+  (`kaos_nlp_transformers.ner`). Default model:
+  `onnx-community/gliner_medium-v2.1` (Apache-2.0 chain via upstream
+  `urchade/gliner_medium-v2.1`; 195M params; 746 MB fp32
+  `onnx/model.onnx`). Implements the GLiNER prompt template
+  `[<<ENT>>, label_1, <<ENT>>, label_2, ..., <<SEP>>, w_1, w_2, ...]`
+  with word-level subword bookkeeping and span enumeration over
+  `(start_word, width)` pairs — ported inline from the gline-rs
+  reference (Apache-2.0) rather than added as a crate dep because
+  gline-rs pins `ort 2.0.0-rc.9` / `tokenizers 0.21` / `ndarray 0.16`
+  vs our 2.0.0-rc.10 / 0.23 / 0.17, and depends on a git-only
+  sibling `orp`. The int8-quantized variant
+  (`onnx/model_quantized.onnx`) was tested and rejected — its scores
+  cap around 0.13 on PyTorch-reference 0.99 inputs, producing
+  zero spans at the default threshold; the fp32 export is the
+  default. `GLiNERExtractor` satisfies
+  `kaos_llm_core.programs.ner.NerExtractor` at runtime.
+- **`NER_REGISTRY` + `NER_EXCLUDED`** in
+  `kaos_nlp_transformers.models`, pinning
+  `onnx-community/gliner_medium-v2.1` and
+  `onnx-community/gliner_multi-v2.1` (English + multilingual
+  GLiNER), and excluding `urchade/gliner_base` +
+  `onnx-community/gliner_base` (both CC-BY-NC 4.0 via upstream's
+  weight licensing).
+- **`NLI_REGISTRY` + `NLI_EXCLUDED`** similarly; the excluded entry
+  records why `Xenova/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`
+  is blocked (NC training-data contamination).
+- **Rust core**: `core::nli::OrtNliClassifier` +
+  `core::nli::NliClassifier` trait;
+  `core::ner::OrtGlinerExtractor` + `core::ner::NerExtractor` trait;
+  PyO3 bindings at `bindings::nli` + `bindings::ner`.
+- **Live integration tests**: `tests/integration/test_nli_live.py`
+  (8 tests, all passing on the real ONNX) and
+  `tests/integration/test_ner_live.py` (9 tests, all passing). The
+  NLI tests verify the canonical
+  `(entailment, neutral, contradiction)` permutation end-to-end; the
+  NER tests verify byte-offset round-trip
+  (`text[start:end] == entity.text`) and threshold monotonicity.
+- **Settings**: `default_nli_model` and `default_ner_model` fields
+  on `KaosNLPTransformersSettings`, overridable via
+  `KAOS_NLP_TRANSFORMERS_DEFAULT_NLI_MODEL` /
+  `KAOS_NLP_TRANSFORMERS_DEFAULT_NER_MODEL`.
+- **`kaos-nlp-transformers prefetch` subcommand** + programmatic
+  `kaos_nlp_transformers.cli.prefetch_models()`. Walks every
+  registry (embedding / reranker / NLI / NER) and calls `.load()`
+  to populate the HF Hub cache before first inference — useful in
+  Dockerfile builds, CI cache-warming jobs, and air-gapped image
+  preparation. Honors `--cache-dir`, `KAOS_NLP_TRANSFORMERS_CACHE_DIR`,
+  `HF_HOME`. Filter with `--include {embedding,reranker,nli,ner}`
+  (repeatable) or `--model <id>` (repeatable). Supports
+  `--dry-run` and `--json` for tooling integration. Exits non-zero
+  on any model load failure but continues through the rest of the
+  batch so one bad row doesn't sink the whole prefetch.
+
+### Changed
+
+- Added `regex` to `[dependencies]` for the GLiNER word-level
+  splitter (`\w+(?:[-_]\w+)*|\S`). Already a transitive dep through
+  `tokenizers`; declaring it directly avoids relying on a transitive
+  API surface.
+- **`Entity.start` / `Entity.end` are codepoint offsets, not byte
+  offsets** (KNT-NLI-003). The initial 0.2.0a7 build emitted byte
+  offsets straight from the `regex` crate; that broke Python's
+  char-indexed slicing on any contract containing curly quotes,
+  em-dashes, or other multi-byte typographic punctuation. The
+  Rust core now builds a byte→char map at split time, slices the
+  source by byte (for `entity.text`) but exports char offsets in
+  `Entity` so `source_text[e.start:e.end] == e.text` round-trips
+  on all UTF-8 input. Caught by the new
+  `tests/scale/test_ner_scale.py` benchmark on EDGAR; the unit
+  ASCII test had been passing through the latent bug. New regression
+  test `test_extract_offsets_roundtrip_on_multibyte_text` locks the
+  invariant in.
+- **Optional `KAOS_NLP_TRANSFORMERS_INTRA_THREADS` env-var override**
+  added to all four ort backends (embedding, reranker, NLI, NER).
+  When unset, ort picks its own intra-op thread count — which
+  empirically beat every explicit setting we tried on a 20-core CPU
+  host (`OMP_NUM_THREADS=1` had zero effect; explicit
+  `intra_threads=20` was 80% slower than the default on the
+  short-sequence GLiNER workload). The env var is kept for tuning
+  unusual deployment shapes (long sequences, large batches, small
+  cgroup quotas).
+
+
 ## [0.2.0a6] — 2026-05-15
 
 ### Changed

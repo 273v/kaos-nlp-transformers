@@ -1,0 +1,31 @@
+{
+  "label": "usc",
+  "n_docs": 200,
+  "n_entities_total": 1353,
+  "threshold": 0.5,
+  "elapsed_s_total": 39.05556479655206,
+  "docs_per_second": 5.120909172401895,
+  "per_call_ms_mean": 195.2778239827603,
+  "per_call_ms_p50": 199.75985446944833,
+  "per_call_ms_p95": 392.92376642115414,
+  "per_call_ms_max": 467.634161002934,
+  "entities_per_doc_mean": 6.765,
+  "entities_per_doc_max": 26,
+  "zero_entity_docs": 12,
+  "label_distribution": {
+    "statute": 455,
+    "federal agency": 162,
+    "date": 650,
+    "monetary amount": 12,
+    "person": 74
+  },
+  "n_invalid_entities": 0,
+  "invalid_entity_samples": [],
+  "labels": [
+    "federal agency",
+    "statute",
+    "date",
+    "person",
+    "monetary amount"
+  ]
+}

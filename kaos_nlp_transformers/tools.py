@@ -7,10 +7,11 @@ soft dependency at import time. The package still works without
 ``kaos-core`` for the pure-Python embedding API; only the MCP surface
 requires it.
 
-Tool surface (v0):
+Tool surface (v0 retrieval + v1 Phase-8 inference):
 
     kaos-nlp-transformers-info
-        Diagnostic envelope: registered models, resolved device, reachable
+        Diagnostic envelope: registered models across all five families
+        (embedding, reranker, NLI, NER, PII), resolved device, reachable
         and latent accelerators with install hints. Read-only, idempotent.
 
     kaos-nlp-transformers-embed
@@ -24,9 +25,23 @@ Tool surface (v0):
     kaos-nlp-transformers-rerank
         Score (query, candidate) pairs with a cross-encoder reranker
         backed by the in-tree Rust ort cdylib and return them sorted
-        by relevance. No extra required for CPU; the
-        ``kaos-nlp-transformers-gpu`` companion wheel adds CUDA.
-        Audit-06 KNT-501 retired the legacy ``[torch]`` requirement.
+        by relevance. No extra required for CPU.
+
+    kaos-nlp-transformers-nli-classify
+        Zero-shot classification via NLI entailment. Score one premise
+        against multiple hypotheses; the argmax over entailment gives the
+        most-supported label. Backed by ``NliModel``. Read-only.
+
+    kaos-nlp-transformers-ner-extract
+        Zero-shot named-entity extraction over caller-supplied labels via
+        GLiNER. Returns char-offset spans. Backed by ``GLiNERExtractor``.
+        Read-only.
+
+    kaos-nlp-transformers-pii-detect
+        Closed-label PII detection over 24 baked-in categories (PERSON,
+        EMAIL_ADDRESS, US_SSN, CREDIT_CARD, IBAN_CODE, FINANCIAL, ...).
+        ~17x faster than the GLiNER tool for the standard PII case.
+        Backed by ``PiiDetector``. Read-only.
 
 KNT-602 Option A (0.2.0a3): the ``kaos-nlp-transformers-dedup-semantic``
 tool moved to kaos-content as ``kaos-content-dedup-semantic`` along
@@ -143,6 +158,12 @@ def register_transformers_tools(runtime: Any) -> int:
             from kaos_nlp_transformers.device import get_system_devices, resolve_device
             from kaos_nlp_transformers.models import (
                 EXCLUDED,
+                NER_EXCLUDED,
+                NER_REGISTRY,
+                NLI_EXCLUDED,
+                NLI_REGISTRY,
+                PII_EXCLUDED,
+                PII_REGISTRY,
                 REGISTRY,
                 RERANKER_EXCLUDED,
                 RERANKER_REGISTRY,
@@ -159,6 +180,9 @@ def register_transformers_tools(runtime: Any) -> int:
                 "settings": {
                     "default_model": settings.default_model,
                     "default_reranker_model": settings.default_reranker_model,
+                    "default_nli_model": settings.default_nli_model,
+                    "default_ner_model": settings.default_ner_model,
+                    "default_pii_model": settings.default_pii_model,
                     "device": settings.device,
                     "backend": settings.backend,
                     "offline": settings.offline,
@@ -229,6 +253,54 @@ def register_transformers_tools(runtime: Any) -> int:
                     ],
                     "excluded": [
                         {"model_id": k, "reason": v} for k, v in sorted(RERANKER_EXCLUDED.items())
+                    ],
+                },
+                "nli_models": {
+                    "registered": [
+                        {
+                            "model_id": m.model_id,
+                            "revision": m.revision,
+                            "license": m.license,
+                            "params_m": m.params_m,
+                            "backend": m.backend,
+                            "notes": m.notes,
+                        }
+                        for m in NLI_REGISTRY.values()
+                    ],
+                    "excluded": [
+                        {"model_id": k, "reason": v} for k, v in sorted(NLI_EXCLUDED.items())
+                    ],
+                },
+                "ner_models": {
+                    "registered": [
+                        {
+                            "model_id": m.model_id,
+                            "revision": m.revision,
+                            "license": m.license,
+                            "params_m": m.params_m,
+                            "backend": m.backend,
+                            "notes": m.notes,
+                        }
+                        for m in NER_REGISTRY.values()
+                    ],
+                    "excluded": [
+                        {"model_id": k, "reason": v} for k, v in sorted(NER_EXCLUDED.items())
+                    ],
+                },
+                "pii_models": {
+                    "registered": [
+                        {
+                            "model_id": m.model_id,
+                            "revision": m.revision,
+                            "license": m.license,
+                            "params_m": m.params_m,
+                            "backend": m.backend,
+                            "notes": m.notes,
+                        }
+                        for m in PII_REGISTRY.values()
+                    ],
+                    "excluded": [
+                        {"model_id": k, "reason": v} for k, v in sorted(PII_EXCLUDED.items())
                     ],
                 },
             }
@@ -770,6 +842,449 @@ def register_transformers_tools(runtime: Any) -> int:
     # see kaos-nlp-transformers CHANGELOG and kaos-content CHANGELOG
     # 0.1.0a3 for the breaking-change rationale.
 
+    # ── 5. kaos-nlp-transformers-nli-classify ────────────────────────
+
+    class NliClassifyTool(KaosTool):
+        """Zero-shot classification via NLI entailment."""
+
+        @property
+        def metadata(self) -> ToolMetadata:
+            return ToolMetadata(
+                name="kaos-nlp-transformers-nli-classify",
+                display_name="NLI Classify",
+                description=(
+                    "Score one premise against multiple hypotheses with a "
+                    "natural-language inference cross-encoder (default "
+                    "Xenova/nli-deberta-v3-base, Apache-2.0 chain, 184M "
+                    "params). Returns one (entailment, neutral, "
+                    "contradiction) probability triple per hypothesis in "
+                    "canonical order. Use the entailment column for "
+                    "zero-shot classification — argmax over hypotheses "
+                    "gives you the most-supported label. No LLM cost."
+                ),
+                category=ToolCategory.TEXT,
+                capability=ToolCapability.ANALYZE,
+                module_name=_MODULE,
+                version=_VERSION,
+                annotations=_RO_ANNOTATIONS,
+                input_schema=[
+                    ParameterSchema(
+                        name="premise",
+                        type="string",
+                        description="The text to classify (premise).",
+                    ),
+                    ParameterSchema(
+                        name="hypotheses",
+                        type="array",
+                        description=(
+                            "Candidate hypotheses to score against the "
+                            "premise. Typically rendered as "
+                            '"This text is about {label}." — supply the '
+                            "rendered strings here. 1..50 hypotheses."
+                        ),
+                        constraints={
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "maxItems": 50,
+                        },
+                    ),
+                    ParameterSchema(
+                        name="model_id",
+                        type="string",
+                        description="Override the NLI model.",
+                        required=False,
+                        default=None,
+                    ),
+                ],
+            )
+
+        async def execute(
+            self, inputs: dict[str, Any], context: KaosContext | None = None
+        ) -> ToolResult:
+            import asyncio
+
+            from kaos_nlp_transformers.errors import (
+                BackendNotInstalledError,
+                DeviceNotReachableError,
+                ModelLoadError,
+                ModelNotRegisteredError,
+            )
+            from kaos_nlp_transformers.nli import NliModel
+            from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
+
+            premise = inputs.get("premise")
+            hypotheses = inputs.get("hypotheses")
+            if not isinstance(premise, str) or not premise.strip():
+                return ToolResult.create_error(
+                    "Parameter 'premise' is required and must be a non-empty string. "
+                    'Fix: pass `{"premise": "…", "hypotheses": ["…"]}`. '
+                    "Alternative: call kaos-nlp-transformers-info to confirm "
+                    "the NLI registry."
+                )
+            if not isinstance(hypotheses, list) or not hypotheses:
+                return ToolResult.create_error(
+                    "Parameter 'hypotheses' is required and must be a non-empty array. "
+                    'Fix: pass `{"hypotheses": ["This text is about contracts.", "..."]}`. '
+                    "Alternative: use kaos-nlp-transformers-embed for vector "
+                    "similarity if you don't have a hypothesis pool."
+                )
+            if any(not isinstance(h, str) for h in hypotheses):
+                return ToolResult.create_error("Every element of 'hypotheses' must be a string.")
+
+            settings = KaosNLPTransformersSettings.from_context(context)
+            model_id = inputs.get("model_id") or settings.default_nli_model
+
+            try:
+                model = NliModel.load(model_id, settings=settings)
+                scores = await asyncio.to_thread(model.score, premise, hypotheses)
+            except (
+                ModelNotRegisteredError,
+                ModelLoadError,
+                DeviceNotReachableError,
+                BackendNotInstalledError,
+            ) as exc:
+                return ToolResult.create_error(str(exc))
+            except Exception as exc:
+                return ToolResult.create_error(
+                    f"NLI scoring failed for model {model_id!r}: {exc}. "
+                    "Fix: call kaos-nlp-transformers-info to confirm the "
+                    "model is registered and the cache is populated. "
+                    "Alternative: try device='cpu' to bypass GPU issues."
+                )
+
+            rows = [
+                {
+                    "hypothesis": h,
+                    "entailment": float(s.entailment),
+                    "neutral": float(s.neutral),
+                    "contradiction": float(s.contradiction),
+                }
+                for h, s in zip(hypotheses, scores, strict=True)
+            ]
+            top = max(rows, key=lambda r: r["entailment"])
+            payload = {
+                "model_id": model.model_id,
+                "device": model.device.device if model.device else "unknown",
+                "premise": premise,
+                "scores": rows,
+                "argmax_hypothesis": top["hypothesis"],
+                "argmax_entailment": top["entailment"],
+            }
+            return ToolResult.create_success(
+                payload,
+                summary=(
+                    f"NLI scored {len(hypotheses)} hypothesis(es); "
+                    f"argmax={top['hypothesis']!r} entailment="
+                    f"{top['entailment']:.3f}"
+                ),
+            )
+
+    # ── 6. kaos-nlp-transformers-ner-extract ─────────────────────────
+
+    class NerExtractTool(KaosTool):
+        """Zero-shot named-entity extraction via GLiNER prompt-based spans."""
+
+        @property
+        def metadata(self) -> ToolMetadata:
+            return ToolMetadata(
+                name="kaos-nlp-transformers-ner-extract",
+                display_name="Zero-Shot NER Extract",
+                description=(
+                    "Extract named entities for caller-supplied labels via "
+                    "a GLiNER prompt-based span-extraction model (default "
+                    "onnx-community/gliner_medium-v2.1, Apache-2.0 chain, "
+                    "195M params, fp32). Labels are arbitrary — "
+                    '"person" / "organization" / "contract clause" / '
+                    '"indemnification party" all work. Returns one entity '
+                    "list per input text with char-offset spans and "
+                    "confidence scores. For closed-label PII detection, "
+                    "prefer kaos-nlp-transformers-pii-detect (~17x faster)."
+                ),
+                category=ToolCategory.TEXT,
+                capability=ToolCapability.ANALYZE,
+                module_name=_MODULE,
+                version=_VERSION,
+                annotations=_RO_ANNOTATIONS,
+                input_schema=[
+                    ParameterSchema(
+                        name="texts",
+                        type="array",
+                        description="Input texts to extract entities from.",
+                        constraints={
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "maxItems": 100,
+                        },
+                    ),
+                    ParameterSchema(
+                        name="labels",
+                        type="array",
+                        description=(
+                            "Entity-class labels to look for. Domain-"
+                            "specific labels work — GLiNER is zero-shot. "
+                            "1..32 labels per call (each label is "
+                            "prepended to every input as a prompt, so "
+                            "very large label sets slow inference)."
+                        ),
+                        constraints={
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "maxItems": 32,
+                        },
+                    ),
+                    ParameterSchema(
+                        name="threshold",
+                        type="number",
+                        description=(
+                            "Minimum sigmoid confidence to accept a span "
+                            "(default 0.5; raise for fewer false positives)."
+                        ),
+                        required=False,
+                        default=0.5,
+                        constraints={"minimum": 0.0, "maximum": 1.0},
+                    ),
+                    ParameterSchema(
+                        name="model_id",
+                        type="string",
+                        description="Override the GLiNER model.",
+                        required=False,
+                        default=None,
+                    ),
+                ],
+            )
+
+        async def execute(
+            self, inputs: dict[str, Any], context: KaosContext | None = None
+        ) -> ToolResult:
+            import asyncio
+
+            from kaos_nlp_transformers.errors import (
+                BackendNotInstalledError,
+                DeviceNotReachableError,
+                ModelLoadError,
+                ModelNotRegisteredError,
+            )
+            from kaos_nlp_transformers.ner import GLiNERExtractor
+            from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
+
+            texts = inputs.get("texts")
+            labels = inputs.get("labels")
+            if not isinstance(texts, list) or not texts:
+                return ToolResult.create_error(
+                    "Parameter 'texts' is required and must be a non-empty array."
+                )
+            if any(not isinstance(t, str) for t in texts):
+                return ToolResult.create_error("Every element of 'texts' must be a string.")
+            if not isinstance(labels, list) or not labels:
+                return ToolResult.create_error(
+                    "Parameter 'labels' is required and must be a non-empty array. "
+                    'Fix: pass `{"labels": ["person", "organization", ...]}`. '
+                    "Alternative: for the standard 24 PII categories without "
+                    "supplying labels, use kaos-nlp-transformers-pii-detect."
+                )
+            if any(not isinstance(label_str, str) for label_str in labels):
+                return ToolResult.create_error("Every element of 'labels' must be a string.")
+
+            threshold = float(inputs.get("threshold") or 0.5)
+            settings = KaosNLPTransformersSettings.from_context(context)
+            model_id = inputs.get("model_id") or settings.default_ner_model
+
+            try:
+                model = GLiNERExtractor.load(model_id, settings=settings)
+                results = await asyncio.to_thread(model.extract, texts, labels, threshold=threshold)
+            except (
+                ModelNotRegisteredError,
+                ModelLoadError,
+                DeviceNotReachableError,
+                BackendNotInstalledError,
+            ) as exc:
+                return ToolResult.create_error(str(exc))
+            except Exception as exc:
+                return ToolResult.create_error(
+                    f"NER extraction failed for model {model_id!r}: {exc}. "
+                    "Fix: call kaos-nlp-transformers-info to confirm the "
+                    "model is registered. "
+                    "Alternative: try threshold=0.3 for higher recall."
+                )
+
+            per_text: list[list[dict[str, Any]]] = []
+            total = 0
+            for entities in results:
+                row: list[dict[str, Any]] = []
+                for e in entities:
+                    row.append(
+                        {
+                            "start": int(e.start),
+                            "end": int(e.end),
+                            "text": e.text,
+                            "label": e.label,
+                            "score": float(e.score),
+                        }
+                    )
+                    total += 1
+                per_text.append(row)
+
+            payload = {
+                "model_id": model.model_id,
+                "device": model.device.device if model.device else "unknown",
+                "labels": list(labels),
+                "threshold": threshold,
+                "n_texts": len(texts),
+                "n_entities_total": total,
+                "entities": per_text,
+            }
+            return ToolResult.create_success(
+                payload,
+                summary=(
+                    f"Extracted {total} entit(ies) across {len(texts)} text(s) "
+                    f"with {len(labels)} label(s); model={model.model_id}"
+                ),
+            )
+
+    # ── 7. kaos-nlp-transformers-pii-detect ──────────────────────────
+
+    class PiiDetectTool(KaosTool):
+        """Closed-label PII detection via BERT-small token classifier."""
+
+        @property
+        def metadata(self) -> ToolMetadata:
+            return ToolMetadata(
+                name="kaos-nlp-transformers-pii-detect",
+                display_name="PII Detect",
+                description=(
+                    "Detect personally-identifiable-information spans in "
+                    "input texts using a closed-label BERT-small token "
+                    "classifier (default onnx-community/bert-small-pii-"
+                    "detection-ONNX, Apache-2.0 chain, 28M params, 27 MB "
+                    "int8). 24 baked-in PII categories — PERSON, "
+                    "EMAIL_ADDRESS, PHONE_NUMBER, US_SSN, CREDIT_CARD, "
+                    "IBAN_CODE, FINANCIAL, LOCATION, ORGANIZATION, "
+                    "DATE_TIME, IP_ADDRESS, etc. Roughly 17x faster than "
+                    "kaos-nlp-transformers-ner-extract at the closed-"
+                    "label task. Use for redaction / compliance "
+                    "workflows; for arbitrary user-supplied label sets, "
+                    "use kaos-nlp-transformers-ner-extract instead."
+                ),
+                category=ToolCategory.TEXT,
+                capability=ToolCapability.ANALYZE,
+                module_name=_MODULE,
+                version=_VERSION,
+                annotations=_RO_ANNOTATIONS,
+                input_schema=[
+                    ParameterSchema(
+                        name="texts",
+                        type="array",
+                        description="Input texts to scan for PII.",
+                        constraints={
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "maxItems": 200,
+                        },
+                    ),
+                    ParameterSchema(
+                        name="score_threshold",
+                        type="number",
+                        description=(
+                            "Minimum softmax confidence (conservative "
+                            "min-across-span) to accept a detected PII "
+                            "span. Default 0.5; raise for fewer false "
+                            "positives or lower for higher recall."
+                        ),
+                        required=False,
+                        default=0.5,
+                        constraints={"minimum": 0.0, "maximum": 1.0},
+                    ),
+                    ParameterSchema(
+                        name="model_id",
+                        type="string",
+                        description="Override the PII model.",
+                        required=False,
+                        default=None,
+                    ),
+                ],
+            )
+
+        async def execute(
+            self, inputs: dict[str, Any], context: KaosContext | None = None
+        ) -> ToolResult:
+            import asyncio
+
+            from kaos_nlp_transformers.errors import (
+                BackendNotInstalledError,
+                DeviceNotReachableError,
+                ModelLoadError,
+                ModelNotRegisteredError,
+            )
+            from kaos_nlp_transformers.pii import PiiDetector
+            from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
+
+            texts = inputs.get("texts")
+            if not isinstance(texts, list) or not texts:
+                return ToolResult.create_error(
+                    "Parameter 'texts' is required and must be a non-empty array."
+                )
+            if any(not isinstance(t, str) for t in texts):
+                return ToolResult.create_error("Every element of 'texts' must be a string.")
+
+            score_threshold = float(inputs.get("score_threshold") or 0.5)
+            settings = KaosNLPTransformersSettings.from_context(context)
+            model_id = inputs.get("model_id") or settings.default_pii_model
+
+            try:
+                detector = PiiDetector.load(model_id, settings=settings)
+                results = await asyncio.to_thread(
+                    detector.detect, texts, score_threshold=score_threshold
+                )
+            except (
+                ModelNotRegisteredError,
+                ModelLoadError,
+                DeviceNotReachableError,
+                BackendNotInstalledError,
+            ) as exc:
+                return ToolResult.create_error(str(exc))
+            except Exception as exc:
+                return ToolResult.create_error(
+                    f"PII detection failed for model {model_id!r}: {exc}. "
+                    "Fix: call kaos-nlp-transformers-info to confirm the "
+                    "model is registered. "
+                    "Alternative: for custom label sets, use "
+                    "kaos-nlp-transformers-ner-extract."
+                )
+
+            per_text: list[list[dict[str, Any]]] = []
+            total = 0
+            for entities in results:
+                row: list[dict[str, Any]] = []
+                for e in entities:
+                    row.append(
+                        {
+                            "start": int(e.start),
+                            "end": int(e.end),
+                            "text": e.text,
+                            "label": e.label,
+                            "score": float(e.score),
+                        }
+                    )
+                    total += 1
+                per_text.append(row)
+
+            payload = {
+                "model_id": detector.model_id,
+                "device": detector.device.device if detector.device else "unknown",
+                "available_labels": list(detector.labels),
+                "score_threshold": score_threshold,
+                "n_texts": len(texts),
+                "n_entities_total": total,
+                "entities": per_text,
+            }
+            return ToolResult.create_success(
+                payload,
+                summary=(
+                    f"Detected {total} PII span(s) across {len(texts)} text(s); "
+                    f"model={detector.model_id}"
+                ),
+            )
+
     # ── Registration ─────────────────────────────────────────────────
 
     tool_classes: list[type[KaosTool]] = [
@@ -777,6 +1292,9 @@ def register_transformers_tools(runtime: Any) -> int:
         EmbedTool,
         RetrieveTool,
         RerankTool,
+        NliClassifyTool,
+        NerExtractTool,
+        PiiDetectTool,
     ]
 
     count = 0

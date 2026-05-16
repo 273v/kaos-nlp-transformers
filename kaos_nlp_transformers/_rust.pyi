@@ -140,6 +140,107 @@ class reranker:
         @property
         def device(self) -> str: ...
 
+class ner:
+    """Runtime module ``kaos_nlp_transformers._rust.ner``.
+
+    Registered by ``rust/bindings/ner.rs::register_module``.
+    """
+
+    class NerBackend:
+        """Rust-backed GLiNER (zero-shot NER) inference. Wraps an ort
+        Session loaded from a registered NER model. Returns a list of
+        per-text entity dicts where each dict has keys: ``start``,
+        ``end`` (byte offsets), ``text`` (the substring), ``label``
+        (the user-supplied label string), ``score`` (sigmoid-normalized
+        probability in ``[0, 1]``)."""
+
+        @staticmethod
+        def load(
+            model_id: str,
+            *,
+            device: str = "cpu",
+            cache_dir: str | None = None,
+        ) -> ner.NerBackend: ...
+        def extract(
+            self,
+            texts: list[str],
+            labels: list[str],
+            *,
+            threshold: float = 0.5,
+            max_width: int = 12,
+            flat_ner: bool = True,
+            dup_label: bool = False,
+            multi_label: bool = False,
+        ) -> list[list[dict[str, Any]]]: ...
+        @property
+        def model_id(self) -> str: ...
+        @property
+        def device(self) -> str: ...
+
+class nli:
+    """Runtime module ``kaos_nlp_transformers._rust.nli``.
+
+    Registered by ``rust/bindings/nli.rs::register_module``.
+    """
+
+    class NliBackend:
+        """Rust-backed NLI cross-encoder inference. Wraps an ort Session
+        loaded from a registered NLI model. Returns softmax-normalized
+        three-class probabilities in canonical
+        ``(entailment, neutral, contradiction)`` order regardless of
+        the model's ``id2label`` permutation."""
+
+        @staticmethod
+        def load(
+            model_id: str,
+            *,
+            device: str = "cpu",
+            cache_dir: str | None = None,
+        ) -> nli.NliBackend: ...
+        def score(
+            self,
+            premises: list[str],
+            hypotheses: list[str],
+            batch_size: int = 16,
+        ) -> np.ndarray[Any, np.dtype[np.float32]]: ...
+        @property
+        def model_id(self) -> str: ...
+        @property
+        def device(self) -> str: ...
+
+class token_classify:
+    """Runtime module ``kaos_nlp_transformers._rust.token_classify``.
+
+    Registered by ``rust/bindings/token_classify.rs::register_module``.
+    """
+
+    class TokenClassifierBackend:
+        """Rust-backed BERT-style token classifier (BIO-decoded NER).
+        Currently serves the registered PII model
+        ``onnx-community/bert-small-pii-detection-ONNX``. Returns
+        per-text lists of entity dicts with char-offset spans, label
+        (post-BIO strip), and softmax confidence."""
+
+        @staticmethod
+        def load(
+            model_id: str,
+            *,
+            device: str = "cpu",
+            cache_dir: str | None = None,
+        ) -> token_classify.TokenClassifierBackend: ...
+        def classify(
+            self,
+            texts: list[str],
+            *,
+            score_threshold: float = 0.5,
+        ) -> list[list[dict[str, Any]]]: ...
+        @property
+        def model_id(self) -> str: ...
+        @property
+        def device(self) -> str: ...
+        @property
+        def labels(self) -> list[str]: ...
+
 class tokenize:
     """Runtime module ``kaos_nlp_transformers._rust.tokenize``.
 

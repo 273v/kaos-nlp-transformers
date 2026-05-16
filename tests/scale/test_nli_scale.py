@@ -64,7 +64,7 @@ def _emit_report(name: str, payload: dict[str, Any]) -> None:
         return
     try:
         _BENCH_DIR.mkdir(parents=True, exist_ok=True)
-        (_BENCH_DIR / f"{name}.json").write_text(json.dumps(payload, indent=2))
+        (_BENCH_DIR / f"{name}.json").write_text(json.dumps(payload, indent=2) + "\n")
     except Exception:
         pass
 

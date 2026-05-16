@@ -36,9 +36,11 @@ def _get_info_tool(runtime: KaosRuntime) -> KaosTool:
 def test_register_transformers_tools_returns_count():
     runtime = _make_runtime()
     n = register_transformers_tools(runtime)
-    # KNT-602 (0.2.0a3): dedup-semantic moved to kaos-content; this
-    # package now registers info / embed / retrieve / rerank only.
-    assert n == 4
+    # KNT-602 (0.2.0a3): dedup-semantic moved to kaos-content. 0.2.0a8
+    # adds Phase-8 inference tools (nli-classify, ner-extract,
+    # pii-detect) on top of the retrieval surface
+    # (info, embed, retrieve, rerank). Total: 7.
+    assert n == 7
 
 
 def test_register_transformers_tools_names():
@@ -49,6 +51,9 @@ def test_register_transformers_tools_names():
         "kaos-nlp-transformers-embed",
         "kaos-nlp-transformers-retrieve",
         "kaos-nlp-transformers-rerank",
+        "kaos-nlp-transformers-nli-classify",
+        "kaos-nlp-transformers-ner-extract",
+        "kaos-nlp-transformers-pii-detect",
     }
     assert expected.issubset(set(runtime.tools.list_tools()))
     # The old dedup-semantic tool was removed; KNT-602 boundary fix.

@@ -1,0 +1,26 @@
+{
+  "label": "usc",
+  "n_docs": 200,
+  "n_pairs_total": 800,
+  "elapsed_s_total": 102.95816720928997,
+  "docs_per_second": 1.9425365215898471,
+  "pairs_per_second": 7.7701460863593885,
+  "per_call_ms_mean": 514.7908360464498,
+  "per_call_ms_p50": 543.733237311244,
+  "per_call_ms_p95": 1046.6835808940232,
+  "per_call_ms_max": 1179.1006331332028,
+  "argmax_distribution": {
+    "This text is an administrative procedure.": 165,
+    "This text concerns interstate commerce.": 31,
+    "This text is a federal criminal statute.": 2,
+    "This text is a tax regulation.": 2
+  },
+  "n_invalid_probs": 0,
+  "invalid_prob_samples": [],
+  "hypotheses": [
+    "This text is an administrative procedure.",
+    "This text is a federal criminal statute.",
+    "This text concerns interstate commerce.",
+    "This text is a tax regulation."
+  ]
+}

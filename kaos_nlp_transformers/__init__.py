@@ -42,17 +42,32 @@ from kaos_nlp_transformers.extraction import (
 )
 from kaos_nlp_transformers.models import (
     EXCLUDED,
+    NER_EXCLUDED,
+    NER_REGISTRY,
+    NLI_EXCLUDED,
+    NLI_REGISTRY,
+    PII_EXCLUDED,
+    PII_REGISTRY,
     REGISTRY,
     RERANKER_EXCLUDED,
     RERANKER_REGISTRY,
     RegisteredModel,
 )
+from kaos_nlp_transformers.ner import Entity, GLiNERExtractor
+from kaos_nlp_transformers.nli import NliModel, NliScore
+from kaos_nlp_transformers.pii import PiiDetector
 from kaos_nlp_transformers.reranker import CrossEncoderReranker
 from kaos_nlp_transformers.retrieval import EmbeddingRetriever
 from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
 
 __all__ = [
     "EXCLUDED",
+    "NER_EXCLUDED",
+    "NER_REGISTRY",
+    "NLI_EXCLUDED",
+    "NLI_REGISTRY",
+    "PII_EXCLUDED",
+    "PII_REGISTRY",
     "REGISTRY",
     "RERANKER_EXCLUDED",
     "RERANKER_REGISTRY",
@@ -64,13 +79,18 @@ __all__ = [
     "EmbeddingError",
     "EmbeddingModel",
     "EmbeddingRetriever",
+    "Entity",
     "ExtractiveRanker",
     "ExtractiveReranker",
+    "GLiNERExtractor",
     "KaosNLPTransformersError",
     "KaosNLPTransformersSettings",
     "LatentDevice",
     "ModelLoadError",
     "ModelNotRegisteredError",
+    "NliModel",
+    "NliScore",
+    "PiiDetector",
     "RegisteredModel",
     "ScoredSegment",
     "SemanticChunker",

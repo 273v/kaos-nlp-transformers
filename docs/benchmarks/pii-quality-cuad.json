@@ -1,0 +1,321 @@
+{
+  "party_like_labels": [
+    "ORGANIZATION",
+    "PERSON"
+  ],
+  "date_like_labels": [
+    "DATE_TIME"
+  ],
+  "score_threshold": 0.5,
+  "n_docs": 5,
+  "elapsed_s": 0.10495964391157031,
+  "corpus": {
+    "party_gold": 21,
+    "party_hit": 15,
+    "party_recall": 0.7142857142857143,
+    "date_gold": 4,
+    "date_hit": 3,
+    "date_recall": 0.75,
+    "n_predictions": 69,
+    "n_predictions_matched": 41,
+    "precision_proxy": 0.5942028985507246
+  },
+  "per_doc": [
+    {
+      "doc_id": "ticketscominc-06-22-1999-ex-10-22-sponsorship-agreement",
+      "n_gold_parties": 4,
+      "party_hits": 4,
+      "n_gold_dates": 1,
+      "date_hits": 1,
+      "n_predicted": 12,
+      "predicted_matched": 4,
+      "predicted_sample": [
+        {
+          "text": "SECURITIES AND EXCHANGE COMMISSION",
+          "label": "ORGANIZATION",
+          "score": 0.695
+        },
+        {
+          "text": "(619) 558-9390",
+          "label": "PHONE_NUMBER",
+          "score": 0.677
+        },
+        {
+          "text": "February 17, 1999",
+          "label": "DATE_TIME",
+          "score": 0.974
+        },
+        {
+          "text": "Tickets.com, Inc.",
+          "label": "ORGANIZATION",
+          "score": 0.752
+        },
+        {
+          "text": "4061 Glencoe Ave., Marina del Rey",
+          "label": "LOCATION",
+          "score": 0.783
+        },
+        {
+          "text": "MP3.com, Inc.",
+          "label": "ORGANIZATION",
+          "score": 0.572
+        },
+        {
+          "text": "P.O. Box 910091,",
+          "label": "LOCATION",
+          "score": 0.543
+        },
+        {
+          "text": "Diego",
+          "label": "LOCATION",
+          "score": 0.542
+        },
+        {
+          "text": "MP3",
+          "label": "ORGANIZATION",
+          "score": 0.617
+        },
+        {
+          "text": "one month",
+          "label": "DATE_TIME",
+          "score": 0.53
+        }
+      ],
+      "missed_parties": [],
+      "missed_dates": []
+    },
+    {
+      "doc_id": "mphasetechnologiesinc-20030911-10-k-ex-10-15-1560667-ex-10-1",
+      "n_gold_parties": 5,
+      "party_hits": 4,
+      "n_gold_dates": 1,
+      "date_hits": 1,
+      "n_predicted": 14,
+      "predicted_matched": 12,
+      "predicted_sample": [
+        {
+          "text": "21st day of January 2003",
+          "label": "DATE_TIME",
+          "score": 0.914
+        },
+        {
+          "text": "Lucent Technologies Inc.",
+          "label": "ORGANIZATION",
+          "score": 0.888
+        },
+        {
+          "text": "600 Mountain Avenue, Murray Hill, New Jersey 07974",
+          "label": "LOCATION",
+          "score": 0.931
+        },
+        {
+          "text": "mPhase Technologies Inc.",
+          "label": "ORGANIZATION",
+          "score": 0.833
+        },
+        {
+          "text": "587 Connecticut Avenue, Norwalk, Connecticut 068545",
+          "label": "LOCATION",
+          "score": 0.891
+        },
+        {
+          "text": "TECHNOLOGIES",
+          "label": "ORGANIZATION",
+          "score": 0.542
+        },
+        {
+          "text": "LUCENT INNOVATION RING DESIGN",
+          "label": "ORGANIZATION",
+          "score": 0.578
+        },
+        {
+          "text": "nt",
+          "label": "ORGANIZATION",
+          "score": 0.527
+        },
+        {
+          "text": "NT",
+          "label": "ORGANIZATION",
+          "score": 0.503
+        },
+        {
+          "text": "LUCENT TECHNOLOGIES",
+          "label": "ORGANIZATION",
+          "score": 0.558
+        }
+      ],
+      "missed_parties": [
+        "(each individually, \"a Party\" and, collectively, \"the Parties\"}."
+      ],
+      "missed_dates": []
+    },
+    {
+      "doc_id": "dragonsystemsinc-01-08-1999-ex-10-17-outsourcing-agreement",
+      "n_gold_parties": 4,
+      "party_hits": 4,
+      "n_gold_dates": 1,
+      "date_hits": 0,
+      "n_predicted": 27,
+      "predicted_matched": 22,
+      "predicted_sample": [
+        {
+          "text": "Securities and Exchange Commission",
+          "label": "ORGANIZATION",
+          "score": 0.72
+        },
+        {
+          "text": "MODUS MEDIA INTERNATIONAL                                 LANDDROSTLA",
+          "label": "ORGANIZATION",
+          "score": 0.502
+        },
+        {
+          "text": "7327 GM APELDOORN",
+          "label": "LOCATION",
+          "score": 0.671
+        },
+        {
+          "text": "DRAGON SYSTEMS, INC.",
+          "label": "ORGANIZATION",
+          "score": 0.87
+        },
+        {
+          "text": "320 NEVADA STREET                                 NEWTON, MA 02160                                      U.S.A",
+          "label": "LOCATION",
+          "score": 0.519
+        },
+        {
+          "text": "DRAGON SYSTEMS",
+          "label": "ORGANIZATION",
+          "score": 0.648
+        },
+        {
+          "text": "Dragon Systems and",
+          "label": "ORGANIZATION",
+          "score": 0.704
+        },
+        {
+          "text": "I",
+          "label": "ORGANIZATION",
+          "score": 0.782
+        },
+        {
+          "text": "I",
+          "label": "ORGANIZATION",
+          "score": 0.51
+        },
+        {
+          "text": "Dragon Systems",
+          "label": "ORGANIZATION",
+          "score": 0.786
+        }
+      ],
+      "missed_parties": [],
+      "missed_dates": [
+        "19 Jan. 1998"
+      ]
+    },
+    {
+      "doc_id": "centrackinternationalinc-10-29-1999-ex-10-3-web-site-hosting",
+      "n_gold_parties": 6,
+      "party_hits": 2,
+      "n_gold_dates": 1,
+      "date_hits": 1,
+      "n_predicted": 12,
+      "predicted_matched": 2,
+      "predicted_sample": [
+        {
+          "text": "561.394.948",
+          "label": "IP_ADDRESS",
+          "score": 0.524
+        },
+        {
+          "text": "32",
+          "label": "LOCATION",
+          "score": 0.55
+        },
+        {
+          "text": "this 6th day of April, 1999",
+          "label": "DATE_TIME",
+          "score": 0.522
+        },
+        {
+          "text": "Centrack International",
+          "label": "ORGANIZATION",
+          "score": 0.895
+        },
+        {
+          "text": "corporation",
+          "label": "ORGANIZATION",
+          "score": 0.672
+        },
+        {
+          "text": "corporation",
+          "label": "ORGANIZATION",
+          "score": 0.65
+        },
+        {
+          "text": "twenty-four (24) hours per day",
+          "label": "DATE_TIME",
+          "score": 0.709
+        },
+        {
+          "text": "seven (7) days per week",
+          "label": "DATE_TIME",
+          "score": 0.677
+        },
+        {
+          "text": "holidays",
+          "label": "DATE_TIME",
+          "score": 0.752
+        },
+        {
+          "text": "the hours of 8pm and",
+          "label": "DATE_TIME",
+          "score": 0.845
+        }
+      ],
+      "missed_parties": [
+        "the Customer",
+        "i-on",
+        "I-ON INTERACTIVE, INC.",
+        "i-on interactive"
+      ],
+      "missed_dates": []
+    },
+    {
+      "doc_id": "lucidinc-04-15-2011-ex-10-9-distributor-agreement",
+      "n_gold_parties": 2,
+      "party_hits": 1,
+      "n_gold_dates": 0,
+      "date_hits": 0,
+      "n_predicted": 4,
+      "predicted_matched": 1,
+      "predicted_sample": [
+        {
+          "text": "Lucid Inc.",
+          "label": "ORGANIZATION",
+          "score": 0.81
+        },
+        {
+          "text": "2320 Brighton Henrietta T/L Road, Rochester NY 14623",
+          "label": "LOCATION",
+          "score": 0.899
+        },
+        {
+          "text": "three (3) calendar years",
+          "label": "DATE_TIME",
+          "score": 0.737
+        },
+        {
+          "text": "(1) calendar year each",
+          "label": "DATE_TIME",
+          "score": 0.517
+        }
+      ],
+      "missed_parties": [
+        "'Distributor'"
+      ],
+      "missed_dates": []
+    }
+  ]
+}

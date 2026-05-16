@@ -1,0 +1,324 @@
+{
+  "labels": [
+    "party",
+    "company",
+    "person",
+    "date"
+  ],
+  "threshold": 0.5,
+  "n_docs": 5,
+  "elapsed_s": 25.529573288280517,
+  "corpus": {
+    "party_gold": 21,
+    "party_hit": 17,
+    "party_recall": 0.8095238095238095,
+    "date_gold": 4,
+    "date_hit": 3,
+    "date_recall": 0.75,
+    "n_predictions": 176,
+    "n_predictions_matched": 159,
+    "precision_proxy": 0.9034090909090909
+  },
+  "per_doc": [
+    {
+      "doc_id": "ticketscominc-06-22-1999-ex-10-22-sponsorship-agreement",
+      "n_gold_parties": 4,
+      "party_hits": 4,
+      "n_gold_dates": 1,
+      "date_hits": 1,
+      "n_predicted": 46,
+      "predicted_matched": 38,
+      "predicted_sample": [
+        {
+          "text": "MP3.com, Inc.",
+          "label": "company",
+          "score": 0.657
+        },
+        {
+          "text": "February 17, 1999",
+          "label": "date",
+          "score": 0.948
+        },
+        {
+          "text": "Effective Date",
+          "label": "date",
+          "score": 0.542
+        },
+        {
+          "text": "Tickets.com, Inc.",
+          "label": "company",
+          "score": 0.823
+        },
+        {
+          "text": "Tickets",
+          "label": "party",
+          "score": 0.796
+        },
+        {
+          "text": "MP3.com, Inc.",
+          "label": "company",
+          "score": 0.822
+        },
+        {
+          "text": "MP3.com",
+          "label": "company",
+          "score": 0.546
+        },
+        {
+          "text": "Tickets",
+          "label": "party",
+          "score": 0.76
+        },
+        {
+          "text": "MP3.com",
+          "label": "company",
+          "score": 0.698
+        },
+        {
+          "text": "tickets",
+          "label": "party",
+          "score": 0.563
+        }
+      ],
+      "missed_parties": [],
+      "missed_dates": []
+    },
+    {
+      "doc_id": "mphasetechnologiesinc-20030911-10-k-ex-10-15-1560667-ex-10-1",
+      "n_gold_parties": 5,
+      "party_hits": 4,
+      "n_gold_dates": 1,
+      "date_hits": 0,
+      "n_predicted": 37,
+      "predicted_matched": 34,
+      "predicted_sample": [
+        {
+          "text": "Lucent Technologies Inc.",
+          "label": "company",
+          "score": 0.911
+        },
+        {
+          "text": "mPhase Technologies Inc.",
+          "label": "party",
+          "score": 0.633
+        },
+        {
+          "text": "mPhase",
+          "label": "party",
+          "score": 0.675
+        },
+        {
+          "text": "mPhase",
+          "label": "party",
+          "score": 0.735
+        },
+        {
+          "text": "mPhase",
+          "label": "party",
+          "score": 0.788
+        },
+        {
+          "text": "mPhase",
+          "label": "party",
+          "score": 0.752
+        },
+        {
+          "text": "mPhase",
+          "label": "party",
+          "score": 0.784
+        },
+        {
+          "text": "mPhase",
+          "label": "party",
+          "score": 0.777
+        },
+        {
+          "text": "mPhase",
+          "label": "party",
+          "score": 0.771
+        },
+        {
+          "text": "mPhase",
+          "label": "party",
+          "score": 0.758
+        }
+      ],
+      "missed_parties": [
+        "(each individually, \"a Party\" and, collectively, \"the Parties\"}."
+      ],
+      "missed_dates": [
+        "21st day of January 2003"
+      ]
+    },
+    {
+      "doc_id": "dragonsystemsinc-01-08-1999-ex-10-17-outsourcing-agreement",
+      "n_gold_parties": 4,
+      "party_hits": 3,
+      "n_gold_dates": 1,
+      "date_hits": 1,
+      "n_predicted": 67,
+      "predicted_matched": 63,
+      "predicted_sample": [
+        {
+          "text": "MMI",
+          "label": "party",
+          "score": 0.737
+        },
+        {
+          "text": "DRAGON SYSTEMS, INC.",
+          "label": "company",
+          "score": 0.88
+        },
+        {
+          "text": "DRAGON SYSTEMS",
+          "label": "party",
+          "score": 0.603
+        },
+        {
+          "text": "EFFECTIVE DATE",
+          "label": "date",
+          "score": 0.686
+        },
+        {
+          "text": "Dragon Systems",
+          "label": "party",
+          "score": 0.714
+        },
+        {
+          "text": "MMI",
+          "label": "party",
+          "score": 0.693
+        },
+        {
+          "text": "MMI",
+          "label": "party",
+          "score": 0.704
+        },
+        {
+          "text": "Dragon Systems",
+          "label": "company",
+          "score": 0.797
+        },
+        {
+          "text": "MMI",
+          "label": "party",
+          "score": 0.607
+        },
+        {
+          "text": "Dragon Systems",
+          "label": "party",
+          "score": 0.783
+        }
+      ],
+      "missed_parties": [
+        "MODUS MEDIA INTERNATIONAL"
+      ],
+      "missed_dates": []
+    },
+    {
+      "doc_id": "centrackinternationalinc-10-29-1999-ex-10-3-web-site-hosting",
+      "n_gold_parties": 6,
+      "party_hits": 5,
+      "n_gold_dates": 1,
+      "date_hits": 1,
+      "n_predicted": 21,
+      "predicted_matched": 19,
+      "predicted_sample": [
+        {
+          "text": "April, 1999",
+          "label": "date",
+          "score": 0.581
+        },
+        {
+          "text": "Centrack International",
+          "label": "company",
+          "score": 0.674
+        },
+        {
+          "text": "i-on interactive",
+          "label": "company",
+          "score": 0.653
+        },
+        {
+          "text": "i-on",
+          "label": "party",
+          "score": 0.504
+        },
+        {
+          "text": "i-on",
+          "label": "party",
+          "score": 0.504
+        },
+        {
+          "text": "April 1, 1999",
+          "label": "date",
+          "score": 0.803
+        },
+        {
+          "text": "i-on",
+          "label": "party",
+          "score": 0.529
+        },
+        {
+          "text": "i-on",
+          "label": "party",
+          "score": 0.525
+        },
+        {
+          "text": "i-on",
+          "label": "party",
+          "score": 0.562
+        },
+        {
+          "text": "i-on",
+          "label": "party",
+          "score": 0.527
+        }
+      ],
+      "missed_parties": [
+        "the Customer"
+      ],
+      "missed_dates": []
+    },
+    {
+      "doc_id": "lucidinc-04-15-2011-ex-10-9-distributor-agreement",
+      "n_gold_parties": 2,
+      "party_hits": 1,
+      "n_gold_dates": 0,
+      "date_hits": 0,
+      "n_predicted": 5,
+      "predicted_matched": 5,
+      "predicted_sample": [
+        {
+          "text": "Lucid Inc.",
+          "label": "company",
+          "score": 0.922
+        },
+        {
+          "text": "Lucid",
+          "label": "company",
+          "score": 0.531
+        },
+        {
+          "text": "Lucid",
+          "label": "company",
+          "score": 0.538
+        },
+        {
+          "text": "Lucid",
+          "label": "company",
+          "score": 0.631
+        },
+        {
+          "text": "LUCID Inc.",
+          "label": "company",
+          "score": 0.763
+        }
+      ],
+      "missed_parties": [
+        "'Distributor'"
+      ],
+      "missed_dates": []
+    }
+  ]
+}

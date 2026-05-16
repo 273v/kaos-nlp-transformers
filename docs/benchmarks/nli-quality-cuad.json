@@ -1,0 +1,215 @@
+{
+  "hypotheses": [
+    "This is a sponsorship agreement.",
+    "This is a co-branding agreement.",
+    "This is an outsourcing agreement.",
+    "This is a web site hosting agreement.",
+    "This is a distributor agreement."
+  ],
+  "n_docs": 5,
+  "n_correct": 5,
+  "accuracy": 1.0,
+  "elapsed_s": 2.985670303925872,
+  "per_doc": [
+    {
+      "doc_id": "ticketscominc-06-22-1999-ex-10-22-sponsorship-agreement",
+      "title": "TICKETSCOMINC_06_22_1999-EX-10.22-SPONSORSHIP AGREEMENT",
+      "gold_hypothesis": "This is a sponsorship agreement.",
+      "predicted_hypothesis": "This is a sponsorship agreement.",
+      "predicted_entailment": 0.9938,
+      "correct": true,
+      "all_scores": [
+        {
+          "hyp": "This is a sponsorship agreement.",
+          "entail": 0.9938,
+          "neutral": 0.0055,
+          "contradict": 0.0007
+        },
+        {
+          "hyp": "This is a co-branding agreement.",
+          "entail": 0.96,
+          "neutral": 0.037,
+          "contradict": 0.003
+        },
+        {
+          "hyp": "This is a distributor agreement.",
+          "entail": 0.8819,
+          "neutral": 0.0899,
+          "contradict": 0.0282
+        },
+        {
+          "hyp": "This is an outsourcing agreement.",
+          "entail": 0.0565,
+          "neutral": 0.9074,
+          "contradict": 0.0361
+        },
+        {
+          "hyp": "This is a web site hosting agreement.",
+          "entail": 0.0504,
+          "neutral": 0.927,
+          "contradict": 0.0226
+        }
+      ]
+    },
+    {
+      "doc_id": "mphasetechnologiesinc-20030911-10-k-ex-10-15-1560667-ex-10-1",
+      "title": "MphaseTechnologiesInc_20030911_10-K_EX-10.15_1560667_EX-10.15_Co-Branding Agreement",
+      "gold_hypothesis": "This is a co-branding agreement.",
+      "predicted_hypothesis": "This is a co-branding agreement.",
+      "predicted_entailment": 0.975,
+      "correct": true,
+      "all_scores": [
+        {
+          "hyp": "This is a co-branding agreement.",
+          "entail": 0.975,
+          "neutral": 0.0237,
+          "contradict": 0.0013
+        },
+        {
+          "hyp": "This is a sponsorship agreement.",
+          "entail": 0.7897,
+          "neutral": 0.1939,
+          "contradict": 0.0164
+        },
+        {
+          "hyp": "This is a distributor agreement.",
+          "entail": 0.6416,
+          "neutral": 0.3466,
+          "contradict": 0.0119
+        },
+        {
+          "hyp": "This is an outsourcing agreement.",
+          "entail": 0.0483,
+          "neutral": 0.9304,
+          "contradict": 0.0212
+        },
+        {
+          "hyp": "This is a web site hosting agreement.",
+          "entail": 0.0387,
+          "neutral": 0.9434,
+          "contradict": 0.0179
+        }
+      ]
+    },
+    {
+      "doc_id": "dragonsystemsinc-01-08-1999-ex-10-17-outsourcing-agreement",
+      "title": "DRAGONSYSTEMSINC_01_08_1999-EX-10.17-OUTSOURCING AGREEMENT",
+      "gold_hypothesis": "This is an outsourcing agreement.",
+      "predicted_hypothesis": "This is an outsourcing agreement.",
+      "predicted_entailment": 0.9793,
+      "correct": true,
+      "all_scores": [
+        {
+          "hyp": "This is an outsourcing agreement.",
+          "entail": 0.9793,
+          "neutral": 0.0193,
+          "contradict": 0.0013
+        },
+        {
+          "hyp": "This is a distributor agreement.",
+          "entail": 0.862,
+          "neutral": 0.1209,
+          "contradict": 0.0171
+        },
+        {
+          "hyp": "This is a sponsorship agreement.",
+          "entail": 0.0754,
+          "neutral": 0.8875,
+          "contradict": 0.0371
+        },
+        {
+          "hyp": "This is a co-branding agreement.",
+          "entail": 0.0282,
+          "neutral": 0.9684,
+          "contradict": 0.0034
+        },
+        {
+          "hyp": "This is a web site hosting agreement.",
+          "entail": 0.01,
+          "neutral": 0.9839,
+          "contradict": 0.0062
+        }
+      ]
+    },
+    {
+      "doc_id": "centrackinternationalinc-10-29-1999-ex-10-3-web-site-hosting",
+      "title": "CENTRACKINTERNATIONALINC_10_29_1999-EX-10.3-WEB SITE HOSTING AGREEMENT",
+      "gold_hypothesis": "This is a web site hosting agreement.",
+      "predicted_hypothesis": "This is a web site hosting agreement.",
+      "predicted_entailment": 0.9941,
+      "correct": true,
+      "all_scores": [
+        {
+          "hyp": "This is a web site hosting agreement.",
+          "entail": 0.9941,
+          "neutral": 0.0051,
+          "contradict": 0.0008
+        },
+        {
+          "hyp": "This is a sponsorship agreement.",
+          "entail": 0.8997,
+          "neutral": 0.0857,
+          "contradict": 0.0147
+        },
+        {
+          "hyp": "This is a distributor agreement.",
+          "entail": 0.7765,
+          "neutral": 0.1803,
+          "contradict": 0.0432
+        },
+        {
+          "hyp": "This is a co-branding agreement.",
+          "entail": 0.3699,
+          "neutral": 0.5652,
+          "contradict": 0.0649
+        },
+        {
+          "hyp": "This is an outsourcing agreement.",
+          "entail": 0.1336,
+          "neutral": 0.8074,
+          "contradict": 0.0589
+        }
+      ]
+    },
+    {
+      "doc_id": "lucidinc-04-15-2011-ex-10-9-distributor-agreement",
+      "title": "LUCIDINC_04_15_2011-EX-10.9-DISTRIBUTOR AGREEMENT",
+      "gold_hypothesis": "This is a distributor agreement.",
+      "predicted_hypothesis": "This is a distributor agreement.",
+      "predicted_entailment": 0.9337,
+      "correct": true,
+      "all_scores": [
+        {
+          "hyp": "This is a distributor agreement.",
+          "entail": 0.9337,
+          "neutral": 0.0454,
+          "contradict": 0.021
+        },
+        {
+          "hyp": "This is a web site hosting agreement.",
+          "entail": 0.0472,
+          "neutral": 0.1044,
+          "contradict": 0.8484
+        },
+        {
+          "hyp": "This is an outsourcing agreement.",
+          "entail": 0.0396,
+          "neutral": 0.9176,
+          "contradict": 0.0428
+        },
+        {
+          "hyp": "This is a co-branding agreement.",
+          "entail": 0.013,
+          "neutral": 0.9723,
+          "contradict": 0.0147
+        },
+        {
+          "hyp": "This is a sponsorship agreement.",
+          "entail": 0.0122,
+          "neutral": 0.9751,
+          "contradict": 0.0127
+        }
+      ]
+    }
+  ]
+}

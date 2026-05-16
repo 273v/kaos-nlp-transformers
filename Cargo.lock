@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "kaos-nlp-transformers"
-version = "0.2.0-alpha.6"
+version = "0.2.0-alpha.8"
 dependencies = [
  "criterion",
  "hf-hub",
@@ -984,6 +984,7 @@ dependencies = [
  "ort",
  "pyo3",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

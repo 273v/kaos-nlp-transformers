@@ -138,6 +138,62 @@ for h in hits:
     print(f"{h.score:.3f}  {h.text}")
 ```
 
+### Phase-8: NLI, NER, and PII
+
+In addition to embedding + reranking, the package ships three small-model
+inference surfaces for legal-tech and financial document workflows. All
+three run through the same in-tree Rust `ort` cdylib — no PyTorch — and
+emit byte-stable char-offset spans where applicable.
+
+```python
+from kaos_nlp_transformers import NliModel, GLiNERExtractor, PiiDetector
+
+# 1) NLI — zero-shot classification via entailment
+#    Default: Xenova/nli-deberta-v3-base (Apache-2.0, 184M params)
+nli = NliModel.load()
+scores = nli.score(
+    "Acme Corp shall pay rent of $5,000/month for the leased premises.",
+    [
+        "This text is about a lease agreement.",
+        "This text is about employment.",
+    ],
+)
+for s in scores:
+    print(f"  entail={s.entailment:.2f}  neutral={s.neutral:.2f}  contradict={s.contradiction:.2f}")
+
+# 2) GLiNER — zero-shot NER over caller-supplied labels
+#    Default: onnx-community/gliner_medium-v2.1 (Apache-2.0, 195M params, 746 MB fp32)
+gliner = GLiNERExtractor.load()
+[entities] = gliner.extract(
+    ["Barack Obama signed the bill on January 1, 2025."],
+    labels=["person", "date"],
+)
+for e in entities:
+    print(f"  [{e.score:.2f}] {e.label:<10} {e.text!r}")
+
+# 3) PII — closed-label BERT-small detector (27 MB int8)
+#    Default: onnx-community/bert-small-pii-detection-ONNX (Apache-2.0)
+#    24 categories: PERSON, EMAIL_ADDRESS, PHONE_NUMBER, US_SSN,
+#    CREDIT_CARD, IBAN_CODE, FINANCIAL, LOCATION, ORGANIZATION, ...
+pii = PiiDetector.load()
+[spans] = pii.detect(["Contact Jennifer Stacey at jen@galera.com today."])
+for e in spans:
+    print(f"  [{e.score:.2f}] {e.label:<15} {e.text!r}")
+```
+
+When to pick which:
+
+* **`PiiDetector`** — fastest (~17× per doc vs GLiNER), use whenever the 24
+  built-in PII categories cover your need. Redaction, compliance,
+  intake screening.
+* **`GLiNERExtractor`** — zero-shot over *any* label set you supply.
+  Slower but flexible — use for domain-specific entities ("indemnification
+  party", "termination notice period") and when accuracy matters more
+  than throughput.
+* **`NliModel`** — entailment-style classification. Pairs with
+  `ZeroShotNLIClassifier` in `kaos-llm-core` for label-set classification
+  without LLM cost.
+
 ## Concepts
 
 The package is built around a small set of typed primitives.
@@ -147,21 +203,39 @@ The package is built around a small set of typed primitives.
 | **`EmbeddingModel`** | The single entry point for inference. `EmbeddingModel.load(model_id, *, device=None, backend=None, settings=None)` resolves the registry entry, picks a backend (`fastembed` for ONNX models on CPU/GPU, `model2vec` for static lookup models), and returns an instance with an `.embed(texts, *, batch_size=32) -> np.ndarray` method. Backends are process-cached by `(model_id, revision, device, cache_dir)` so repeated `load()` calls are O(1). |
 | **`RegisteredModel` / `REGISTRY` / `EXCLUDED`** | Curated, license-vetted model catalog. Each entry pins a HuggingFace Hub commit SHA (audit-01 KNT-003: revisions thread through the loader cache key). The `EXCLUDED` map names models intentionally rejected with their licensing reason — jina-v3 (CC-BY-NC), NV-Embed (CC-BY-NC), Qwen3-Embedding (MS MARCO ambiguity). v0 ships `BAAI/bge-small-en-v1.5` (33M, MIT, fastembed) plus three model2vec entries (`potion-base-8M`, `potion-base-32M`, `potion-retrieval-32M`). `potion-base-8M` is **vendored inside the wheel** (~28 MB), so it loads offline with no network. |
 | **`EmbeddingRetriever`** | Brute-force cosine similarity search over a numpy matrix. `from_texts(...)` and `from_corpus(...)` factories. For corpora up to ~50K documents this is faster than FAISS overhead. Implements the `kaos_nlp_core.search.SearchHit` protocol. |
-| **`CrossEncoderReranker`** | Optional second-pass reranker via `fastembed.TextCrossEncoder` (default `BAAI/bge-reranker-base`, MIT). No extra required for CPU; `[gpu]` accelerates on CUDA. Use to refine `EmbeddingRetriever` top-50 → top-10. Sigmoid-normalized scores in `[0, 1]`. |
+| **`CrossEncoderReranker`** | Optional second-pass reranker via the in-tree Rust `ort` backend (default `BAAI/bge-reranker-base`, MIT). No extra required for CPU; `[gpu]` accelerates on CUDA. Use to refine `EmbeddingRetriever` top-50 → top-10. Sigmoid-normalized scores in `[0, 1]`. |
+| **`NliModel`** | Natural-language-inference cross-encoder for zero-shot classification. `.score(premise, hypotheses)` returns one `(entailment, neutral, contradiction)` triple per hypothesis (softmax-normalized, canonical order). Default `Xenova/nli-deberta-v3-base` (Apache-2.0 chain, 184M params, 244 MB int8). Satisfies the `NLIScorer` Protocol in `kaos-llm-core` — drop-in for `ZeroShotNLIClassifier`. |
+| **`GLiNERExtractor`** | Zero-shot named-entity extraction via prompt-based span scoring. `.extract(texts, labels=[...])` returns `list[list[Entity]]` with char-offset spans. Default `onnx-community/gliner_medium-v2.1` (Apache-2.0 chain, 195M params, 746 MB fp32 — the int8 quantized export underperforms and was deliberately rejected). Multilingual sibling `onnx-community/gliner_multi-v2.1` also registered. |
+| **`PiiDetector`** | Closed-label BERT-small token classifier covering 24 PII categories (PERSON, EMAIL_ADDRESS, US_SSN, CREDIT_CARD, IBAN_CODE, FINANCIAL, …). Default `onnx-community/bert-small-pii-detection-ONNX` (Apache-2.0 chain, 28M params, 27 MB int8). Roughly 17× faster than `GLiNERExtractor` at the closed-label task; output `Entity` shape is shared so redaction pipelines consume both interchangeably. |
 | **`SemanticDedupLevel`** | Plug-in for `kaos-content`'s deduplication framework. Embeds documents, computes pairwise cosine distance with `scipy.spatial.distance.pdist`, and clusters with `scipy.cluster.hierarchy.fcluster`. Requires the `[clustering]` extra. |
-| **`KaosNLPTransformersSettings`** | Typed settings (env prefix `KAOS_NLP_TRANSFORMERS_`): `default_model`, `default_reranker_model`, `cache_dir`, `offline`, `allow_unregistered`, `device`, `backend`, `profile`. Honors legacy `HF_HUB_OFFLINE` and `HF_HOME`. When `offline=True`, the load path sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` (audit-01 KNT-005). |
+| **`KaosNLPTransformersSettings`** | Typed settings (env prefix `KAOS_NLP_TRANSFORMERS_`): `default_model`, `default_reranker_model`, `default_nli_model`, `default_ner_model`, `default_pii_model`, `cache_dir`, `offline`, `allow_unregistered`, `device`, `backend`, `profile`. Honors legacy `HF_HUB_OFFLINE` and `HF_HOME`. When `offline=True`, the load path sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. |
 | **Device detection** | `detect_devices()` returns a `SystemDevices` snapshot (reachable accelerators + ONNX execution providers + latent GPUs the OS sees but the install can't drive). `EmbeddingModel.load(device="auto")` picks the best available; explicit `"cpu"` / `"cuda"` / `"cuda:0"` / `"openvino"` are honored. Audit-06 KNT-501 retired `mps` and `xla` alongside the torch backend. |
 
 ## CLI
 
 `kaos-nlp-transformers` ships a `kaos-nlp-transformers` administrative
-CLI (`info` subcommand) plus a `kaos-nlp-transformers-serve` MCP server
-launcher that requires the `[mcp]` extra:
+CLI plus a `kaos-nlp-transformers-serve` MCP server launcher that
+requires the `[mcp]` extra:
 
 ```bash
-kaos-nlp-transformers info --json    # version + registry + device snapshot
-kaos-nlp-transformers-serve          # stdio MCP server (requires [mcp])
+# Diagnostic envelope: version, registry, device, ONNX providers
+kaos-nlp-transformers info --json
+
+# Pre-warm the HF Hub cache with every registered model — useful in
+# Dockerfile builds, CI cache-warming, air-gapped image prep.
+kaos-nlp-transformers prefetch                  # all 5 families
+kaos-nlp-transformers prefetch --include pii    # one family
+kaos-nlp-transformers prefetch --model onnx-community/bert-small-pii-detection-ONNX
+kaos-nlp-transformers prefetch --dry-run        # show what would be fetched
+kaos-nlp-transformers prefetch --quiet --json   # CI-friendly
+
+# stdio MCP server
+kaos-nlp-transformers-serve                     # requires [mcp]
 ```
+
+Prefetch honors `HF_HOME` and `KAOS_NLP_TRANSFORMERS_CACHE_DIR` and
+exits non-zero on any model failure (continuing through the rest of
+the batch so one bad row doesn't sink the whole prefetch).
 
 ## Compatibility & status
 

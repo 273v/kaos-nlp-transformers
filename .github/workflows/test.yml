@@ -1,0 +1,87 @@
+name: test
+
+# Standard `test` lane (per
+# kaos-modules/docs/oss/40-ci-cd/runner-cost-reduction-plan.md):
+# normal unit tests (not live, not network, not slow) on Linux Python
+# 3.13. Includes `cargo test --no-default-features` for the pure-Rust
+# core and `maturin develop --release` for the PyO3 boundary before
+# pytest.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  rust-test:
+    name: rust-test (no PyO3)
+    runs-on: kaos-x64-16core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cargo test (--no-default-features)
+        run: cargo test --no-default-features --lib
+
+  test:
+    name: test
+    runs-on: kaos-x64-16core
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: test-linux-py3.13
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --group dev --extra model2vec --python 3.13
+
+      - name: Build PyO3 extension (maturin develop --release)
+        run: uv run maturin develop --release
+
+      - name: Run tests
+        run: |
+          uv run pytest \
+            -m "not live" \
+            --cov=kaos_nlp_transformers \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            tests/
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-linux-py3.13
+          path: coverage.xml
+          retention-days: 14

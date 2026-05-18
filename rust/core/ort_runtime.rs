@@ -362,7 +362,7 @@ mod tests {
         let model = lookup_embedding("BAAI/bge-small-en-v1.5").expect("registered");
         let backend = OrtBackend::load(model, &Device::Cpu, None).expect("load");
         let texts = ["hello world", "the quick brown fox"];
-        let out = backend.embed(&texts.to_vec(), 8).expect("embed");
+        let out = backend.embed(texts.as_ref(), 8).expect("embed");
         assert_eq!(out.dim(), (2, 384));
         // Unit norm check.
         for row in out.axis_iter(Axis(0)) {

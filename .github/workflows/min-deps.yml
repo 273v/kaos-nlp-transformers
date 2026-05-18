@@ -1,0 +1,48 @@
+name: min-deps
+
+# Standard `min-deps` lane (per
+# kaos-modules/docs/oss/40-ci-cd/runner-cost-reduction-plan.md):
+# lowest-direct dependency contract. NOT a PR / main-push lane —
+# runs weekly, on manual dispatch, and on release tags.
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"  # Mondays at 05:23 UTC
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: min-deps-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  min-deps:
+    name: min-deps
+    runs-on: kaos-x64-16core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install with lowest-direct resolution
+        run: uv sync --group dev --extra model2vec --resolution=lowest-direct --python 3.13
+
+      - name: Build PyO3 extension
+        run: uv run maturin develop --release
+
+      - name: Run tests
+        run: uv run pytest -m "not live" --no-cov -q tests/

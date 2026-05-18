@@ -363,7 +363,7 @@ mod tests {
         let backend = OrtBackend::load(model, &Device::Cpu, None).expect("load");
         let texts = ["hello world", "the quick brown fox"];
         let out = backend
-            .embed(&texts.iter().copied().collect::<Vec<_>>(), 8)
+            .embed(&texts.to_vec(), 8)
             .expect("embed");
         assert_eq!(out.dim(), (2, 384));
         // Unit norm check.

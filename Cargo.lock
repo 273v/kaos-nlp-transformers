@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "kaos-nlp-transformers"
-version = "0.2.0-alpha.8"
+version = "0.1.0-alpha.7"
 dependencies = [
  "criterion",
  "hf-hub",

@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.1.0a7] — 2026-05-20
+
+WU-F.8 of the 0.1.0 GA plan
+(`kaos-modules/docs/plans/2026-05-20-0.1.0-ga-plan.md`).
+Decision #1 of the GA plan: stay on the 0.1.x line for ecosystem
+consistency with the rest of the kaos-* DAG. The intervening
+0.2.0aN PyPI releases (a1..a8) shipped the Phase-8 NLI / GLiNER /
+PiiDetector inference stack and the KNT-601 hard cutover to the
+in-tree Rust `ort` cdylib; that code is preserved in this release
+under a 0.1.x version label.
+
+Note: PEP 440 ordering means the prior 0.2.0a8 PyPI release will
+still resolve as "newest" for callers without an explicit `<0.2`
+ceiling. 0.1.x consumers should pin `kaos-nlp-transformers<0.2`.
+
+### Changed
+
+- Version label: source moves from `0.2.0-alpha.8` back to
+  `0.1.0-alpha.7` (Cargo.toml single source of truth). PEP 440
+  wheel metadata reads `0.1.0a7`.
+- Bumped minimum `kaos-core` to `0.1.0a12,<0.2` (was `>=0.1.0a1`):
+  catch up to current post-URI-redesign + Capability type API.
+- Refreshed `uv.lock`: `kaos-core 0.1.0a10 -> 0.1.0a12`,
+  `kaos-content 0.1.0a2 -> 0.1.0a12`, `kaos-nlp-core 0.1.0a6 -> 0.1.0a8`,
+  `ruff 0.15.12 -> 0.15.13`, `ty 0.0.34 -> 0.0.36`,
+  `maturin 1.13.1 -> 1.13.3`.
+
+### Internal
+
+- 237 unit tests pass with the rebuilt Rust cdylib at
+  `0.1.0-alpha.7`. `ruff format / check / ty check` clean.
+
+
 ## [0.2.0a8] — 2026-05-16
 
 Consolidates the work originally drafted for an in-flight 0.2.0a7 (NLI +

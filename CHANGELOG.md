@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.1.0rc1] — 2026-05-20
+
+WU-J of the 0.1.0 GA plan
+(`kaos-modules/docs/plans/2026-05-20-0.1.0-ga-plan.md`): release
+candidate; pin floor raised to `>=0.1.0rc1,<0.2` across kaos-* deps;
+freezes the public API surface ahead of GA. No source changes vs
+0.1.0a7.
+
+### Changed
+
+- Version label: Cargo.toml `[package].version` bumped from
+  `0.1.0-alpha.7` to `0.1.0-rc.1`. Maturin emits PEP 440-normalized
+  wheel metadata `0.1.0rc1`. `kaos_nlp_transformers._version.__version__`
+  reads from `importlib.metadata` so it matches automatically.
+- Runtime `kaos-core` pin raised to `>=0.1.0rc1,<0.2` (was
+  `>=0.1.0a12,<0.2`).
+- Runtime `kaos-nlp-core` pin raised to `>=0.1.0rc1,<0.2` (was
+  `>=0.1.0a6` with no upper bound). The `<0.2` ceiling protects
+  against legacy `0.2.0a*` lines leaking into resolution.
+- Refreshed `uv.lock` against the just-published `kaos-core 0.1.0rc1`
+  and `kaos-nlp-core 0.1.0rc1` on PyPI.
+
+### Internal
+
+- 237 unit tests pass with the rebuilt Rust cdylib at `0.1.0-rc.1`.
+  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test --no-default-features` (43 passed, 6 ignored),
+  `ruff format --check`, `ruff check`, and `ty check` all clean.
+
+
 ## [0.1.0a7] — 2026-05-20
 
 WU-F.8 of the 0.1.0 GA plan

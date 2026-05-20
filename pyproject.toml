@@ -47,7 +47,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "kaos-core>=0.1.0a1",
+  "kaos-core>=0.1.0a12,<0.2",
   # 0.1.0a5 introduced kaos_nlp_core.{chunking,similarity} + the
   # _rust.chunking.semantic_pack kernel that SemanticChunker calls.
   # (The 0.1.0a4 tag exists but its release run failed at the wheels

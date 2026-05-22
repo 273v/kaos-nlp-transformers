@@ -223,3 +223,6 @@ exclude-newer = "72 hours"
 "kaos-source" = false
 "kaos-tabular" = false
 "kaos-web" = false
+# Security-patch exemptions — CVE fixes shipped in the last 72h are
+# allowed to flow through pip-audit. Add lines here with rationale.
+"idna" = false  # CVE-2026-45409, fixed in 3.15 (uploaded 2026-05-12)

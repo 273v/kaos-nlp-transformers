@@ -654,11 +654,13 @@ def register_transformers_tools(runtime: Any) -> int:
                 description=(
                     "Score (query, candidate) pairs with a cross-encoder "
                     "reranker (default BAAI/bge-reranker-base, MIT) via "
-                    "fastembed.TextCrossEncoder (ONNX) and return them "
-                    "sorted by relevance. Sigmoid-normalized scores in "
-                    "[0, 1]. Pair with kaos-nlp-transformers-retrieve: "
-                    "take its top-50 hits, rerank to top-10. CPU works "
-                    "out of the box; install [gpu] for CUDA acceleration. "
+                    "the in-tree Rust ort cdylib (libonnxruntime) and "
+                    "return them sorted by relevance. Sigmoid-normalized "
+                    "scores in [0, 1]. Pair with kaos-nlp-transformers-"
+                    "retrieve: take its top-50 hits, rerank to top-10. "
+                    "CPU works out of the box; CUDA via the separate "
+                    "kaos-nlp-transformers-gpu companion wheel built with "
+                    "cargo build --features gpu. "
                     f"Hard-cap: {_MAX_RERANK_CANDIDATES} candidates per call."
                 ),
                 category=ToolCategory.TEXT,

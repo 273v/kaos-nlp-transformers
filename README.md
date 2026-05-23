@@ -14,22 +14,25 @@
 layer for KAOS — a typed Python API over an in-tree Rust cdylib that
 calls [`ort`](https://github.com/pykeio/ort) (libonnxruntime via Rust)
 to turn text into float32 vectors and back. It ships a license-vetted
-model registry, an optional cross-encoder reranker, and a semantic-dedup
-level that plugs into `kaos-content`'s deduplication framework.
+model registry and an optional cross-encoder reranker. (Semantic
+deduplication lives in `kaos-content`'s
+`dedup.levels.semantic.SemanticDedupLevel` after KNT-602; install
+`kaos-content[transformers,clustering]` for that surface.)
 
 It is dependency-light at the BASE: the install pulls in only `numpy`,
 `huggingface_hub`, and the core KAOS runtime (`kaos-core`,
-`kaos-content`, `kaos-nlp-core`). **No PyTorch, no Python `fastembed`,
+`kaos-nlp-core`). **No PyTorch, no Python `fastembed`,
 no Python `onnxruntime`** — the inference path is a Rust cdylib
 (`kaos_nlp_transformers._rust`) shipped inside the wheel; libonnxruntime
 is statically linked. Both embedding (`EmbeddingModel`) and
 cross-encoder reranking (`CrossEncoderReranker`) run through the same
 backend on CPU out of the box. Optional extras layer in adjacencies —
-`[gpu]` for the GPU companion wheel (ort/cuda EP, NVIDIA),
-`[openvino]` for Intel OpenVINO acceleration,
-`[model2vec]` for the static-numpy lookup backend (~500x CPU speedup),
-`[clustering]` for SciPy-backed semantic dedup, and `[mcp]` for the
-MCP tool surface. Free-threaded Python (3.13t / 3.14t) is supported.
+`[model2vec]` for the static-numpy lookup backend (~500x CPU speedup)
+and `[mcp]` for the MCP tool surface. `[gpu]` and `[openvino]` are
+reserved-and-no-op aliases today (GPU acceleration ships as a
+separate `kaos-nlp-transformers-gpu` companion wheel built with
+`--features gpu`); `[torch]` is a deprecated no-op alias scheduled
+for removal in 0.3.0. Free-threaded Python (3.13t / 3.14t) is supported.
 
 ## Use, data handling, and authorship disclosure
 
@@ -67,11 +70,14 @@ pip install kaos-nlp-transformers
 ort backend. Add the extras you need:
 
 ```bash
-uv add "kaos-nlp-transformers[gpu]"          # NVIDIA CUDA companion wheel (0.2.0a2)
-uv add "kaos-nlp-transformers[openvino]"     # Intel CPU / GPU acceleration (0.2.0a2)
 uv add "kaos-nlp-transformers[model2vec]"    # Static-numpy backend (~500x CPU)
-uv add "kaos-nlp-transformers[clustering]"   # SemanticDedupLevel (scipy)
 uv add "kaos-nlp-transformers[mcp]"          # MCP tool surface
+# NVIDIA CUDA acceleration ships as a separate companion wheel:
+#   pip install kaos-nlp-transformers-gpu
+# Intel OpenVINO is built into a wheel from source:
+#   cargo build --release --features openvino
+# Semantic deduplication moved to kaos-content (KNT-602):
+#   uv add "kaos-content[transformers,clustering]"
 ```
 
 > **0.2.0 migration note (KNT-601).** Audit KNT-601 retired the Python
@@ -207,7 +213,6 @@ The package is built around a small set of typed primitives.
 | **`NliModel`** | Natural-language-inference cross-encoder for zero-shot classification. `.score(premise, hypotheses)` returns one `(entailment, neutral, contradiction)` triple per hypothesis (softmax-normalized, canonical order). Default `Xenova/nli-deberta-v3-base` (Apache-2.0 chain, 184M params, 244 MB int8). Satisfies the `NLIScorer` Protocol in `kaos-llm-core` — drop-in for `ZeroShotNLIClassifier`. |
 | **`GLiNERExtractor`** | Zero-shot named-entity extraction via prompt-based span scoring. `.extract(texts, labels=[...])` returns `list[list[Entity]]` with char-offset spans. Default `onnx-community/gliner_medium-v2.1` (Apache-2.0 chain, 195M params, 746 MB fp32 — the int8 quantized export underperforms and was deliberately rejected). Multilingual sibling `onnx-community/gliner_multi-v2.1` also registered. |
 | **`PiiDetector`** | Closed-label BERT-small token classifier covering 24 PII categories (PERSON, EMAIL_ADDRESS, US_SSN, CREDIT_CARD, IBAN_CODE, FINANCIAL, …). Default `onnx-community/bert-small-pii-detection-ONNX` (Apache-2.0 chain, 28M params, 27 MB int8). Roughly 17× faster than `GLiNERExtractor` at the closed-label task; output `Entity` shape is shared so redaction pipelines consume both interchangeably. |
-| **`SemanticDedupLevel`** | Plug-in for `kaos-content`'s deduplication framework. Embeds documents, computes pairwise cosine distance with `scipy.spatial.distance.pdist`, and clusters with `scipy.cluster.hierarchy.fcluster`. Requires the `[clustering]` extra. |
 | **`KaosNLPTransformersSettings`** | Typed settings (env prefix `KAOS_NLP_TRANSFORMERS_`): `default_model`, `default_reranker_model`, `default_nli_model`, `default_ner_model`, `default_pii_model`, `cache_dir`, `offline`, `allow_unregistered`, `device`, `backend`, `profile`. Honors legacy `HF_HUB_OFFLINE` and `HF_HOME`. When `offline=True`, the load path sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. |
 | **Device detection** | `detect_devices()` returns a `SystemDevices` snapshot (reachable accelerators + ONNX execution providers + latent GPUs the OS sees but the install can't drive). `EmbeddingModel.load(device="auto")` picks the best available; explicit `"cpu"` / `"cuda"` / `"cuda:0"` / `"openvino"` are honored. Audit-06 KNT-501 retired `mps` and `xla` alongside the torch backend. |
 

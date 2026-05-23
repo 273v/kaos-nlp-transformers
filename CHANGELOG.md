@@ -5,7 +5,7 @@ All notable changes to `kaos-nlp-transformers` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
+
 ## [Unreleased]
 
 ### Changed
@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.1.0 GA release (WU-L #543) that froze the public API for the
   0.1.x line. Closes audit-04/kaos-nlp-transformers.md Family D (classifier drift).
 
+### Fixed
+
+- **README rewritten to match the post-KNT-602 install surface.**
+  README.md identity / install / concept-table sections previously
+  claimed `kaos-content` was a base dependency, advertised a
+  `[clustering]` extra, and listed `SemanticDedupLevel` as a package
+  concept — all three were moved to `kaos-content` by KNT-602 and
+  removed from `pyproject.toml`. Users following the README hit
+  resolver errors (`Extra 'clustering' is not defined`) and import
+  errors (`cannot import name 'SemanticDedupLevel'`).
+  README now:
+  - states semantic dedup lives in `kaos-content[transformers,clustering]`;
+  - drops `kaos-content` from the base-install list;
+  - replaces the `[clustering]` install line with the correct extras
+    (`[model2vec]`, `[mcp]`) and a pointer to the companion GPU wheel +
+    OpenVINO build-from-source path;
+  - removes the stale `SemanticDedupLevel` row from the concept table.
+  Closes audit-04/kaos-nlp-transformers.md F-001.
 
 
 ## [0.1.0] — 2026-05-20

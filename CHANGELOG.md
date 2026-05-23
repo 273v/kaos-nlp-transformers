@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.1.1] — 2026-05-23
+
+audit-04 remediation bundle. Picks up the Family D classifier bump and
+the F-001 README/init/EmbeddingModel/rerank-tool stale-text fixes onto
+the 0.1.x line. Cargo crate version bumped from `0.1.0` to `0.1.1`;
+maturin emits the PEP 440-normalized wheel metadata `0.1.1`.
+
 ### Changed
 
 - `pyproject.toml` classifier bumped from `Development Status :: 3 - Alpha`

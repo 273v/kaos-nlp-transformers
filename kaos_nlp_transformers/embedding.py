@@ -64,8 +64,13 @@ logger = get_logger(__name__)
 class EmbeddingModel:
     """Dense embedding inference with automatic backend and device selection.
 
-    Supports fastembed (ONNX Runtime; CPU + ``[gpu]`` extra for CUDA) and
-    model2vec (pure-numpy static lookup). Device is auto-detected by default.
+    Supports ``ort`` (the in-tree Rust cdylib calling libonnxruntime via
+    the `ort` crate; CPU by default, CUDA when the wheel was built with
+    ``cargo build --features gpu``) and ``model2vec`` (pure-numpy static
+    lookup, requires the ``[model2vec]`` extra). Device is auto-detected
+    by default. KNT-601 (0.2.0) retired the ``fastembed`` Python wrapper;
+    callers that passed ``backend_name="fastembed"`` get a deprecation
+    warning + automatic redirect to ``"ort"``.
     """
 
     def __init__(

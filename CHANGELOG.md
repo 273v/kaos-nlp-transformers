@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.1.5] — 2026-06-02
+
+### Added
+
+- **Disk-backed incremental embedding cache (opt-in, default off).** New
+  setting `KaosNLPTransformersSettings.embedding_cache_dir` (env
+  `KAOS_NLP_TRANSFORMERS_EMBEDDING_CACHE_DIR`). When set,
+  `EmbeddingModel.embed()` persists computed vectors under that directory
+  keyed by `(model_id, revision, dim, dtype, blake2b(text))` and consults
+  the cache before running the forward pass, so the same texts survive
+  process restarts: a long-running service no longer re-embeds the same
+  corpus on every cold start, and a growing corpus only pays inference
+  for genuinely new texts. The in-process `embedding_cache_size` LRU keeps
+  working and composes in front of the disk cache (LRU hit, then disk,
+  then inference); both layers reuse the same `blake2b` key derivation.
+  On-disk layout is one `.npy` per text under
+  `<root>/<safe_model_id>/<revision>/<dim>-<dtype>/<hex_hash>.npy`;
+  entries are namespaced by model id, revision, dimension, and dtype so a
+  model/revision/shape change never serves stale vectors. Writes are
+  atomic (temp file + rename), corrupt/mismatched entries read as misses,
+  and the cache is unbounded by design (operator prunes by deleting files
+  or namespace subdirectories). It is separate from the HuggingFace
+  snapshot cache (`cache_dir` / `HF_HOME`). Cached vectors are
+  bit-identical float32 to the uncached output.
+
+
 ## [0.1.4] — 2026-06-02
 
 ### Changed

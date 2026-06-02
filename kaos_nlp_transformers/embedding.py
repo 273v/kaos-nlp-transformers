@@ -49,6 +49,7 @@ import numpy as np
 from kaos_core.logging import get_logger
 
 from kaos_nlp_transformers.device import DeviceInfo, resolve_device
+from kaos_nlp_transformers.disk_cache import DiskEmbeddingCache
 from kaos_nlp_transformers.errors import (
     BackendNotInstalledError,
     EmbeddingError,
@@ -80,11 +81,13 @@ class EmbeddingModel:
         *,
         device: DeviceInfo | None = None,
         backend_name: str = "fastembed",
+        disk_cache: DiskEmbeddingCache | None = None,
     ) -> None:
         self._registered = registered
         self._backend = _backend
         self._device = device
         self._backend_name = backend_name
+        self._disk_cache = disk_cache
 
     @property
     def model_id(self) -> str:
@@ -239,6 +242,23 @@ class EmbeddingModel:
         else:
             registered = REGISTRY[target]
 
+        # Audit KNT-602 (0.1.5): build the opt-in disk-backed embedding
+        # cache when ``embedding_cache_dir`` is set. Namespaced by
+        # (model_id, revision, dim, dtype) so a model/revision/shape
+        # change never serves stale vectors. The in-proc LRU composes in
+        # front of it. ``dim`` may be 0 for unregistered models; the disk
+        # cache is skipped in that case since the shape contract is
+        # unknown and entries could not be safely validated on read.
+        disk_cache: DiskEmbeddingCache | None = None
+        if s.embedding_cache_dir is not None and registered.dim > 0:
+            disk_cache = DiskEmbeddingCache(
+                s.embedding_cache_dir,
+                model_id=registered.model_id,
+                revision=registered.revision,
+                dim=registered.dim,
+                dtype="float32",
+            )
+
         # --- Resolve device ---
         device_info = resolve_device(req_device)
 
@@ -289,6 +309,7 @@ class EmbeddingModel:
                     m2v_backend,
                     device=cpu_device,
                     backend_name="model2vec",
+                    disk_cache=disk_cache,
                 )
             # Audit KNT-601 (0.2.0): post-fastembed-removal, the embedding
             # path goes through the Rust ``_rust.embedding.PyEmbeddingBackend``
@@ -314,6 +335,7 @@ class EmbeddingModel:
                 rust_backend,
                 device=device_info,
                 backend_name="ort",
+                disk_cache=disk_cache,
             )
 
     def embed(self, texts: Iterable[str], *, batch_size: int = 32) -> np.ndarray:
@@ -340,38 +362,57 @@ class EmbeddingModel:
         if not text_list:
             return np.zeros((0, self.dim), dtype=np.float32)
 
-        # Audit KNT-601 (0.2.0): opt-in process-wide LRU cache. When
-        # enabled, look up each text first; collect misses, embed only
-        # those, splice cached and freshly-embedded rows back together
-        # by original-position index so the output ordering matches the
-        # input. Disabled by default (size 0) → straight passthrough.
-        if _EMBED_CACHE_SIZE > 0:
-            cached_rows: list[np.ndarray | None] = [None] * len(text_list)
-            miss_indices: list[int] = []
-            for i, t in enumerate(text_list):
-                cached_rows[i] = _embed_cache_get(self.model_id, self._registered.revision, t)
-                if cached_rows[i] is None:
-                    miss_indices.append(i)
-            # All hits: assemble the cached rows directly.
-            if not miss_indices:
-                # Every entry is non-None at this branch — narrow for ty.
-                rows: list[np.ndarray] = [r for r in cached_rows if r is not None]
-                return np.stack(rows, axis=0).astype(np.float32, copy=False)
-            # Some misses: embed the missing texts only.
-            miss_texts = [text_list[i] for i in miss_indices]
-            miss_arr = self._embed_uncached(miss_texts, batch_size=batch_size)
-            # Splice and write-back.
-            for offset, original_idx in enumerate(miss_indices):
-                row = miss_arr[offset]
-                cached_rows[original_idx] = row
-                _embed_cache_put(
-                    self.model_id, self._registered.revision, text_list[original_idx], row
-                )
-            rows = [r for r in cached_rows if r is not None]
+        # Opt-in cache layers, in lookup order:
+        #   1. process-wide LRU (KNT-601, settings.embedding_cache_size)
+        #   2. disk-backed incremental cache (KNT-602 0.1.5,
+        #      settings.embedding_cache_dir) — survives restarts.
+        # Both reuse the SAME ``_hash_text`` key derivation so an entry
+        # written by one layer is found by the other. When neither is
+        # active this is a straight passthrough to the backend.
+        lru_on = _EMBED_CACHE_SIZE > 0
+        disk = self._disk_cache
+        if not lru_on and disk is None:
+            return self._embed_uncached(text_list, batch_size=batch_size)
+
+        model_id = self.model_id
+        revision = self._registered.revision
+        cached_rows: list[np.ndarray | None] = [None] * len(text_list)
+        miss_indices: list[int] = []
+        # Per-text content hash, computed once and shared across layers.
+        digests = [_hash_text(t) for t in text_list]
+        for i, digest in enumerate(digests):
+            row: np.ndarray | None = None
+            if lru_on:
+                row = _embed_cache_get_digest(model_id, revision, digest)
+            if row is None and disk is not None:
+                row = disk.get(digest.hex())
+                # Promote a disk hit into the in-proc LRU so a subsequent
+                # call in the same process skips the file read too.
+                if row is not None and lru_on:
+                    _embed_cache_put_digest(model_id, revision, digest, row)
+            cached_rows[i] = row
+            if row is None:
+                miss_indices.append(i)
+
+        # All hits: assemble the cached rows directly.
+        if not miss_indices:
+            rows: list[np.ndarray] = [r for r in cached_rows if r is not None]
             return np.stack(rows, axis=0).astype(np.float32, copy=False)
 
-        # Cache disabled — straight path through the backend.
-        return self._embed_uncached(text_list, batch_size=batch_size)
+        # Some misses: run the forward pass for the missing texts only.
+        miss_texts = [text_list[i] for i in miss_indices]
+        miss_arr = self._embed_uncached(miss_texts, batch_size=batch_size)
+        # Splice and write-back to every active layer.
+        for offset, original_idx in enumerate(miss_indices):
+            row = miss_arr[offset]
+            cached_rows[original_idx] = row
+            digest = digests[original_idx]
+            if lru_on:
+                _embed_cache_put_digest(model_id, revision, digest, row)
+            if disk is not None:
+                disk.put(digest.hex(), row)
+        rows = [r for r in cached_rows if r is not None]
+        return np.stack(rows, axis=0).astype(np.float32, copy=False)
 
     def _embed_uncached(self, texts: list[str], *, batch_size: int) -> np.ndarray:
         """The embed body that talks directly to the backend.
@@ -518,11 +559,11 @@ def _hash_text(text: str) -> bytes:
     return hashlib.blake2b(text.encode("utf-8"), digest_size=16).digest()
 
 
-def _embed_cache_get(model_id: str, revision: str, text: str) -> np.ndarray | None:
-    """Return the cached vector for ``text`` or None on miss / disabled."""
+def _embed_cache_get_digest(model_id: str, revision: str, digest: bytes) -> np.ndarray | None:
+    """Return the LRU vector for a precomputed text digest, or None."""
     if _EMBED_CACHE_SIZE <= 0:
         return None
-    key = (model_id, revision, _hash_text(text))
+    key = (model_id, revision, digest)
     with _EMBED_CACHE_LOCK:
         v = _EMBED_CACHE.get(key)
         if v is None:
@@ -532,16 +573,28 @@ def _embed_cache_get(model_id: str, revision: str, text: str) -> np.ndarray | No
         return v
 
 
-def _embed_cache_put(model_id: str, revision: str, text: str, vector: np.ndarray) -> None:
-    """Store a vector for ``text``; evicts the oldest entry if at capacity."""
+def _embed_cache_put_digest(
+    model_id: str, revision: str, digest: bytes, vector: np.ndarray
+) -> None:
+    """Store a vector for a precomputed text digest; evicts oldest at cap."""
     if _EMBED_CACHE_SIZE <= 0:
         return
-    key = (model_id, revision, _hash_text(text))
+    key = (model_id, revision, digest)
     with _EMBED_CACHE_LOCK:
         _EMBED_CACHE[key] = vector
         _EMBED_CACHE.move_to_end(key)
         while len(_EMBED_CACHE) > _EMBED_CACHE_SIZE:
             _EMBED_CACHE.popitem(last=False)
+
+
+def _embed_cache_get(model_id: str, revision: str, text: str) -> np.ndarray | None:
+    """Return the cached vector for ``text`` or None on miss / disabled."""
+    return _embed_cache_get_digest(model_id, revision, _hash_text(text))
+
+
+def _embed_cache_put(model_id: str, revision: str, text: str, vector: np.ndarray) -> None:
+    """Store a vector for ``text``; evicts the oldest entry if at capacity."""
+    _embed_cache_put_digest(model_id, revision, _hash_text(text), vector)
 
 
 def _embed_cache_set_size(size: int) -> None:

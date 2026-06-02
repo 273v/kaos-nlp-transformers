@@ -103,6 +103,28 @@ class KaosNLPTransformersSettings(ModuleSettings):
     day. Audit KNT-601 (0.2.0) opt-in addition.
     """
 
+    embedding_cache_dir: Path | None = None
+    """Directory for the disk-backed incremental embedding cache. Default
+    ``None`` = disabled.
+
+    When set, ``EmbeddingModel.embed()`` persists computed vectors under
+    this directory keyed by ``(model_id, revision, dim, dtype,
+    blake2b(text))`` and consults it before running the forward pass, so
+    the same texts survive process restarts: a long-running service no
+    longer re-embeds the same corpus on every cold start, and a growing
+    corpus only pays inference for genuinely new texts. The in-process
+    ``embedding_cache_size`` LRU still works and composes in front of the
+    disk cache (LRU hit first, then disk, then inference).
+
+    Entries are namespaced by model id, revision, dimension, and dtype,
+    so a model/revision/shape change never serves stale vectors. The
+    cache is unbounded by design (incremental corpus); it has no silent
+    cap. An operator prunes it by deleting files or namespace
+    subdirectories under this root. This is separate from the HuggingFace
+    snapshot cache (``cache_dir`` / ``HF_HOME``), which holds model
+    weights rather than computed vectors. Set
+    ``KAOS_NLP_TRANSFORMERS_EMBEDDING_CACHE_DIR`` to enable it."""
+
     workspace_root: Path | None = None
     """Filesystem sandbox root for any tool that reads or writes files.
 

@@ -100,24 +100,62 @@ pub const RERANKER_REGISTRY: &[RegisteredModel] = &[RegisteredModel {
 /// only ships an AVX-512-VNNI quantized variant which fails on CPUs
 /// without VNNI. License chain: weights are Apache-2.0 from upstream;
 /// Xenova fork is a pure 🤗 Optimum re-export with no fine-tuning.
-pub const NLI_REGISTRY: &[RegisteredModel] = &[RegisteredModel {
-    model_id: "Xenova/nli-deberta-v3-base",
-    // 2025-07-14 HEAD of main; verified via /api/models/{id} on 2026-05-15.
-    revision: "80a99030ce45a69a39ea2a6f50756d03859ff521",
-    // Use the portable quantized variant (244 MB) — matches the
-    // bge-reranker-base precedent of "quantized by default" and is
-    // the variant Transformers.js callers actually pull. The plain
-    // int8 export (model_int8.onnx, 223 MB) is also available; the
-    // quantized variant is chosen here because it's better tested
-    // across the HF Optimum lineage.
-    onnx_filename: "onnx/model_quantized.onnx",
-    tokenizer_filename: "tokenizer.json",
-    pooling: Pooling::Cls, // unused for NLI; classifier head reads CLS.
-    normalize: false,      // softmax-normalized in core::nli, not L2.
-    dim: 3,                // 3-class output: entailment / neutral / contradiction.
-    max_seq_len: 512,
-    license: "Apache-2.0",
-}];
+pub const NLI_REGISTRY: &[RegisteredModel] = &[
+    // DEFAULT (since 0.1.4): MNLI + FEVER + ANLI training. Same
+    // DeBERTa-v3-base size (~184M) as the prior default but trained on
+    // FEVER (fact-verification entailment over paraphrased evidence) and
+    // ANLI — fixing the "neutral on supported paraphrases" collapse the
+    // SNLI+MNLI-only Xenova/nli-deberta-v3-base exhibited on legal
+    // fact-checking. id2label = {0: entailment, 1: neutral,
+    // 2: contradiction} (verified config.json @ pinned SHA) → canonical
+    // permutation is the identity [0, 1, 2] (see core::nli). fp32
+    // onnx/model.onnx is used deliberately: int8/quantized DeBERTa
+    // degrades the borderline entailment-vs-neutral decision we are
+    // fixing. License: MIT (MoritzLaurer weights; Xenova fork is a pure
+    // Optimum ONNX re-export).
+    RegisteredModel {
+        model_id: "Xenova/DeBERTa-v3-base-mnli-fever-anli",
+        revision: "72a1ce83a0144efaf828b3c3844320a61197a53d",
+        onnx_filename: "onnx/model.onnx",
+        tokenizer_filename: "tokenizer.json",
+        pooling: Pooling::Cls,
+        normalize: false,
+        dim: 3,
+        max_seq_len: 512,
+        license: "MIT",
+    },
+    // HIGH-ACCURACY OPTION: DeBERTa-v3-large + MNLI/FEVER/ANLI/Ling/WANLI
+    // (~435M). ANLI-all .702, WANLI .77 (worker-and-AI paraphrastic NLI)
+    // — strongest paraphrase entailment of the candidates, at ~1.74 GB
+    // fp32. Same id2label / identity permutation. License: MIT. Native
+    // onnx/ folder in the MoritzLaurer repo (no separate fork).
+    RegisteredModel {
+        model_id: "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli",
+        revision: "b3546ea6b0346eb6f8d5d68b13c7dc6d0376b3d7",
+        onnx_filename: "onnx/model.onnx",
+        tokenizer_filename: "tokenizer.json",
+        pooling: Pooling::Cls,
+        normalize: false,
+        dim: 3,
+        max_seq_len: 512,
+        license: "MIT",
+    },
+    // RETAINED for back-compat: the prior default. SNLI + MNLI only —
+    // under-calls paraphrase entailment; kept registered but no longer
+    // the default. id2label = {0: contradiction, 1: entailment,
+    // 2: neutral} → permutation [1, 2, 0].
+    RegisteredModel {
+        model_id: "Xenova/nli-deberta-v3-base",
+        revision: "80a99030ce45a69a39ea2a6f50756d03859ff521",
+        onnx_filename: "onnx/model_quantized.onnx",
+        tokenizer_filename: "tokenizer.json",
+        pooling: Pooling::Cls,
+        normalize: false,
+        dim: 3,
+        max_seq_len: 512,
+        license: "Apache-2.0",
+    },
+];
 
 /// All GLiNER (zero-shot NER) checkpoints. Mirror of
 /// ``kaos_nlp_transformers.models.NER_REGISTRY``. GLiNER is a

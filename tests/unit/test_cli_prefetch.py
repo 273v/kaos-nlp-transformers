@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from kaos_nlp_transformers import NLI_REGISTRY
 from kaos_nlp_transformers.cli import (
     _prefetch_one,
     main,
@@ -117,12 +118,13 @@ def test_real_path_with_mocked_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     code, payload = _run(["prefetch", "--include", "nli", "--json"])
     assert code == 0
     assert isinstance(payload, dict)
-    assert payload["n_ok"] == 1
+    assert payload["n_ok"] == len(NLI_REGISTRY)
     assert payload["n_failed"] == 0
     # Cache-delta is always present even on a no-op run.
     assert "cache_delta_mb" in payload
-    # Loader was called once for NLI only.
-    assert calls == [("nli", "Xenova/nli-deberta-v3-base")]
+    # Every registered NLI checkpoint is prefetched, NLI family only.
+    assert all(fam == "nli" for fam, _ in calls)
+    assert {mid for _, mid in calls} == set(NLI_REGISTRY)
 
 
 def test_failure_propagates_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,7 +141,7 @@ def test_failure_propagates_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> Non
     code, payload = _run(["prefetch", "--include", "nli", "--json"])
     assert code == 2  # non-zero on failure
     assert isinstance(payload, dict)
-    assert payload["n_failed"] == 1
+    assert payload["n_failed"] == len(NLI_REGISTRY)
     assert payload["models"][0]["status"] == "failed"
 
 
@@ -167,9 +169,10 @@ def test_programmatic_prefetch_models_smoke(
 
     monkeypatch.setattr("kaos_nlp_transformers.cli._prefetch_one", fake_prefetch_one)
     envelope = prefetch_models(families=["nli"])
-    assert envelope["n_ok"] == 1
+    assert envelope["n_ok"] == len(NLI_REGISTRY)
     assert envelope["n_failed"] == 0
-    assert envelope["models"][0]["model_id"] == "Xenova/nli-deberta-v3-base"
+    # All registered NLI checkpoints are prefetched (order not guaranteed).
+    assert {m["model_id"] for m in envelope["models"]} == set(NLI_REGISTRY)
 
 
 def test_prefetch_one_records_failure_on_unknown_family() -> None:

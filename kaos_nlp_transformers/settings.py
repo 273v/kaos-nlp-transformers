@@ -38,11 +38,15 @@ class KaosNLPTransformersSettings(ModuleSettings):
     ``CrossEncoderReranker.load()``. Same single-source-of-truth pattern as
     ``default_model``: change this and every internal default updates."""
 
-    default_nli_model: str = "Xenova/nli-deberta-v3-base"
+    default_nli_model: str = "Xenova/DeBERTa-v3-base-mnli-fever-anli"
     """Default NLI (natural language inference) cross-encoder loaded by
     ``NliModel.load()``. Same single-source-of-truth pattern as
     ``default_model`` / ``default_reranker_model``. Must be present in
-    ``NLI_REGISTRY`` (or ``allow_unregistered`` must be true)."""
+    ``NLI_REGISTRY`` (or ``allow_unregistered`` must be true).
+
+    Switched 0.1.4 from ``Xenova/nli-deberta-v3-base`` (SNLI+MNLI only,
+    under-called paraphrase entailment) to the MNLI+FEVER+ANLI checkpoint
+    for reliable fact-checking. The prior model stays registered."""
 
     default_ner_model: str = "onnx-community/gliner_medium-v2.1"
     """Default GLiNER (zero-shot NER) extractor loaded by

@@ -182,3 +182,29 @@ def test_nli_score_satisfies_runtime_nli_score_protocol() -> None:
     assert s.entailment == pytest.approx(0.6)
     assert s.neutral == pytest.approx(0.3)
     assert s.contradiction == pytest.approx(0.1)
+
+
+# -- 0.1.4 registry: stronger FEVER+ANLI default --------------------------
+
+
+def test_default_nli_is_fever_anli_checkpoint() -> None:
+    """0.1.4 switched the default to the MNLI+FEVER+ANLI checkpoint that
+    actually calls paraphrase entailment (the legal fact-checking fix)."""
+    assert DEFAULT_NLI_MODEL == "Xenova/DeBERTa-v3-base-mnli-fever-anli"
+    assert DEFAULT_NLI_MODEL in NLI_REGISTRY
+
+
+def test_nli_registry_has_fever_anli_and_large_options() -> None:
+    for mid in (
+        "Xenova/DeBERTa-v3-base-mnli-fever-anli",
+        "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli",
+        "Xenova/nli-deberta-v3-base",  # prior default, retained for back-compat
+    ):
+        assert mid in NLI_REGISTRY, f"{mid} missing from NLI_REGISTRY"
+
+
+def test_all_nli_entries_pinned_permissive_three_class() -> None:
+    for mid, entry in NLI_REGISTRY.items():
+        assert entry.dim == 3, f"{mid} is not 3-class"
+        assert entry.license in {"MIT", "Apache-2.0"}, f"{mid} license {entry.license}"
+        assert entry.revision != "main" and len(entry.revision) >= 7, f"{mid} unpinned"

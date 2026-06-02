@@ -206,6 +206,41 @@ RERANKER_EXCLUDED: dict[str, str] = {}
 # Revision SHA verified against huggingface.co/api/models/{id} on
 # 2026-05-15.
 NLI_REGISTRY: dict[str, RegisteredModel] = {
+    "Xenova/DeBERTa-v3-base-mnli-fever-anli": RegisteredModel(
+        model_id="Xenova/DeBERTa-v3-base-mnli-fever-anli",
+        revision="72a1ce83a0144efaf828b3c3844320a61197a53d",
+        license="MIT",
+        params_m=184,
+        dim=3,
+        backend="ort",
+        notes=(
+            "DEFAULT since 0.1.4. DeBERTa-v3-base trained on MNLI + "
+            "FEVER-NLI + ANLI — fixes the SNLI+MNLI-only base model's "
+            "collapse to neutral on supported paraphrases (the legal "
+            "fact-checking failure mode). MNLI-m/mm .903, FEVER-NLI .777, "
+            "ANLI-all .579. id2label {0:entailment, 1:neutral, "
+            "2:contradiction}. fp32 onnx/model.onnx (int8 degrades the "
+            "borderline entail-vs-neutral call). MoritzLaurer weights MIT; "
+            "Xenova fork is a pure Optimum ONNX re-export. Verified "
+            "config.json + onnx @ SHA 2026-06-02."
+        ),
+    ),
+    "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli": RegisteredModel(
+        model_id="MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli",
+        revision="b3546ea6b0346eb6f8d5d68b13c7dc6d0376b3d7",
+        license="MIT",
+        params_m=435,
+        dim=3,
+        backend="ort",
+        notes=(
+            "High-accuracy option. DeBERTa-v3-large + MNLI/FEVER/ANLI/Ling/"
+            "WANLI. ANLI-all .702, MNLI-m .912, WANLI .77 (paraphrastic NLI) "
+            "— strongest paraphrase entailment, at ~1.74 GB fp32. id2label "
+            "{0:entailment, 1:neutral, 2:contradiction}. MIT (native onnx/ "
+            "in the MoritzLaurer repo). Verified config.json + onnx @ SHA "
+            "2026-06-02."
+        ),
+    ),
     "Xenova/nli-deberta-v3-base": RegisteredModel(
         model_id="Xenova/nli-deberta-v3-base",
         revision="80a99030ce45a69a39ea2a6f50756d03859ff521",

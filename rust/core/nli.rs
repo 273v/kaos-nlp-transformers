@@ -125,11 +125,18 @@ impl OrtNliClassifier {
 
         let tok = TokenizerWrapper::from_file(&tokenizer, model.max_seq_len)?;
 
-        // TODO: when a second NLI checkpoint lands, read config.json
-        // ``id2label`` at load time and derive ``canonical_perm``
-        // dynamically. For 0.2.0a7 we serve a single model whose
-        // permutation is fixed.
+        // Canonical permutation per registered checkpoint, derived from
+        // each model's verified ``config.json`` ``id2label``. ``perm[k]``
+        // is the raw output column for canonical class ``k``
+        // (0=entailment, 1=neutral, 2=contradiction). The registry is
+        // compiled-in, so adding a model already requires a Rust edit —
+        // its permutation is recorded here in the same place.
         let canonical_perm = match model.model_id {
+            // id2label = {0: entailment, 1: neutral, 2: contradiction}
+            // → already canonical, identity permutation. (Verified
+            // config.json @ pinned SHA for both MoritzLaurer checkpoints.)
+            "Xenova/DeBERTa-v3-base-mnli-fever-anli"
+            | "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli" => [0, 1, 2],
             "Xenova/nli-deberta-v3-base" => {
                 // id2label = {0: contradiction, 1: entailment, 2: neutral}
                 // canonical = (entailment, neutral, contradiction)

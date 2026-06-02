@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.1.4] — 2026-06-02
+
+### Changed
+
+- **Default NLI model switched to a MNLI+FEVER+ANLI checkpoint.**
+  `NliModel.load()` now defaults to `Xenova/DeBERTa-v3-base-mnli-fever-anli`
+  (same DeBERTa-v3-base ~184M size, MIT). The prior default
+  `Xenova/nli-deberta-v3-base` was trained on **SNLI + MNLI only** and
+  collapsed to `neutral` on supported paraphrases — unusable for gating
+  legal fact-checking, whose claims are paraphrases of authority text.
+  FEVER is fact-verification entailment over paraphrased evidence, so the
+  new default actually fires entailment on paraphrase support. The prior
+  model stays registered for back-compat. Empirically (16-pair paraphrase-
+  entailment probe, ort backend, CPU): old default 12/16 and returned
+  `neutral` (0.00 entail) on an inferential paraphrase; new default 13/16,
+  same case → `entailment` 0.92 (same ~184M, ~21 vs ~14 ms/pair); the large
+  option scored 16/16 (entail 0.99 on that case, ~65 ms/pair).
+
+### Added
+
+- `MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli` (~435M, MIT)
+  added to `NLI_REGISTRY` as the high-accuracy option (ANLI-all .702,
+  WANLI .77 paraphrastic NLI):
+  `NliModel.load("MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli")`.
+- Both new checkpoints use fp32 `onnx/model.onnx` deliberately (int8/
+  quantized DeBERTa degrades the borderline entailment-vs-neutral
+  decision); revisions pinned, `id2label` verified, canonical-permutation
+  handling added in `core::nli` (both are identity `[0,1,2]`).
+
 ## [0.1.1] — 2026-05-23
 
 audit-04 remediation bundle. Picks up the Family D classifier bump and

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -188,6 +189,75 @@ class CrossEncoderReranker:
             device_info.name,
         )
         return cls(backend, model_id=registered.model_id, device=device_info)
+
+    @classmethod
+    def from_local_path(
+        cls,
+        local_path: str | Path,
+        *,
+        device: str | None = None,
+        max_seq_len: int = 512,
+        model_id: str = "local",
+        settings: KaosNLPTransformersSettings | None = None,
+    ) -> CrossEncoderReranker:
+        """Load a cross-encoder reranker from a local directory, bypassing
+        HF Hub and the registry.
+
+        Expected layout under ``local_path``::
+
+            local_path/
+              onnx/model.onnx       (the ONNX export, fp32 or int8)
+              tokenizer.json        (fast-tokenizer)
+              config.json           (optional, for reference)
+
+        Caller is responsible for license review and validating that the
+        ONNX inputs match the registered contract (input_ids,
+        attention_mask, optionally token_type_ids → single logit per pair).
+
+        Args:
+            local_path: Directory containing the ONNX + tokenizer.
+            device: Device override ('auto', 'cpu', 'cuda', ...).
+            max_seq_len: Truncation cap for query+passage pairs.
+            model_id: Informational identifier shown in logs and
+                ``CrossEncoderReranker.model_id``. Default ``"local"``.
+            settings: Optional settings override.
+
+        Returns:
+            A ``CrossEncoderReranker`` ready to ``rerank`` queries.
+        """
+        # Attribute-style access through the parent ``_rust`` module so the
+        # single-file ``_rust.pyi`` stub resolves at type-check time (mirrors
+        # ``_load_cross_encoder_cached`` below). Identical runtime semantics
+        # to ``from _rust.reranker import CrossEncoderBackend``.
+        from kaos_nlp_transformers import _rust
+
+        CrossEncoderBackend = _rust.reranker.CrossEncoderBackend
+
+        s = settings if settings is not None else KaosNLPTransformersSettings()
+        path = Path(local_path).resolve()
+        if not path.is_dir():
+            raise ModelLoadError(
+                f"local_path {path} is not a directory",
+                model_id=model_id,
+            )
+
+        req_device = device or s.device
+        device_info = resolve_device(req_device)
+
+        backend = CrossEncoderBackend.load_local(
+            str(path),
+            device=device_info.device,
+            max_seq_len=max_seq_len,
+            model_id=model_id,
+        )
+        logger.info(
+            "Loaded reranker %s from local path %s on %s (%s) via ort (Rust)",
+            model_id,
+            path,
+            device_info.device,
+            device_info.name,
+        )
+        return cls(backend, model_id=model_id, device=device_info)
 
     async def rerank(
         self,

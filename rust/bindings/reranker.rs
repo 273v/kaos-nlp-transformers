@@ -9,7 +9,7 @@
 //! Score contract: returns sigmoid-normalized [0, 1] floats — same
 //! contract the Python ``rerank()`` documented before KNT-601.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use numpy::{IntoPyArray, PyArray1};
@@ -52,6 +52,40 @@ impl PyCrossEncoderBackend {
 
         let backend = py
             .detach(|| OrtCrossEncoder::load(model, &dev, cache.as_deref()))
+            .map_err(|e| map_backend_error(py, e))?;
+
+        let model_id = backend.model_id().to_string();
+        let device_str = backend.device().to_string();
+
+        Ok(Self {
+            inner: Arc::new(backend),
+            model_id,
+            device_str,
+        })
+    }
+
+    /// Load a cross-encoder reranker from a local directory, bypassing
+    /// HF Hub and the static registry. Caller is responsible for license
+    /// review.
+    ///
+    /// Expected layout under ``local_path``:
+    ///   ``onnx/model.onnx`` — the ONNX export
+    ///   ``tokenizer.json`` — fast-tokenizer json
+    #[staticmethod]
+    #[pyo3(signature = (local_path, *, device = "cpu", max_seq_len = 512, model_id = "local"))]
+    fn load_local(
+        py: Python<'_>,
+        local_path: &str,
+        device: &str,
+        max_seq_len: usize,
+        model_id: &str,
+    ) -> PyResult<Self> {
+        let dev = Device::parse(device).map_err(|e| map_backend_error(py, e))?;
+        let path = PathBuf::from(local_path);
+        let path_ref: &Path = &path;
+
+        let backend = py
+            .detach(|| OrtCrossEncoder::load_local(path_ref, &dev, max_seq_len, model_id))
             .map_err(|e| map_backend_error(py, e))?;
 
         let model_id = backend.model_id().to_string();

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`CrossEncoderReranker.from_local_path()`** — load a cross-encoder
+  reranker from a local directory (expects `onnx/model.onnx` +
+  `tokenizer.json`), bypassing the Hugging Face Hub fetch and the static
+  registry. Backed by a new Rust `OrtCrossEncoder::load_local` core path
+  and `CrossEncoderBackend.load_local` binding. The caller is responsible
+  for license review and for validating that the ONNX inputs match the
+  registered contract. Input validation (missing directory / missing
+  `onnx/model.onnx`) raises `ModelLoadError`.
+
 
 ## [0.1.5] — 2026-06-02
 

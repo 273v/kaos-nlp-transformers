@@ -110,6 +110,90 @@ impl OrtCrossEncoder {
             accepts_token_type_ids,
         })
     }
+
+    /// Load a cross-encoder from a local directory, bypassing both the
+    /// HF Hub fetch and the static registry. Caller is responsible for
+    /// license review.
+    ///
+    /// Expects layout:
+    ///   ``local_path/onnx/model.onnx``
+    ///   ``local_path/tokenizer.json``
+    ///
+    /// ``model_id`` is purely informational (used in logs and error
+    /// messages) since there's no registry entry to look up.
+    pub fn load_local(
+        local_path: &Path,
+        device: &Device,
+        max_seq_len: usize,
+        model_id: &str,
+    ) -> Result<Self> {
+        let onnx = local_path.join("onnx").join("model.onnx");
+        let tokenizer = local_path.join("tokenizer.json");
+
+        if !onnx.exists() {
+            return Err(BackendError::model_load(
+                model_id,
+                "local",
+                format!("missing onnx/model.onnx at {}", onnx.display()),
+            ));
+        }
+        if !tokenizer.exists() {
+            return Err(BackendError::model_load(
+                model_id,
+                "local",
+                format!("missing tokenizer.json at {}", tokenizer.display()),
+            ));
+        }
+
+        let builder = Session::builder()
+            .map_err(|e| {
+                BackendError::model_load(model_id, "local", format!("Session::builder: {e}"))
+            })?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| {
+                BackendError::model_load(model_id, "local", format!("optimization level: {e}"))
+            })?;
+
+        // Reuse the env-var intra_threads override; pass a dummy
+        // RegisteredModel built on the local model_id so error messages
+        // are coherent.
+        let synthetic = RegisteredModel {
+            model_id: Box::leak(model_id.to_string().into_boxed_str()),
+            revision: "local",
+            onnx_filename: "onnx/model.onnx",
+            tokenizer_filename: "tokenizer.json",
+            pooling: crate::core::pooling::Pooling::Cls,
+            normalize: false,
+            dim: 1,
+            max_seq_len,
+            license: "UNKNOWN",
+        };
+        let builder = configure_intra_threads(builder, &synthetic)?;
+        let mut builder = configure_eps(builder, device, &synthetic)?;
+
+        let session = builder.commit_from_file(&onnx).map_err(|e| {
+            BackendError::model_load(
+                model_id,
+                "local",
+                format!("commit_from_file({}): {e}", onnx.display()),
+            )
+        })?;
+
+        let accepts_token_type_ids = session
+            .inputs()
+            .iter()
+            .any(|input| input.name() == "token_type_ids");
+
+        let tok = TokenizerWrapper::from_file(&tokenizer, max_seq_len)?;
+
+        Ok(Self {
+            session: Mutex::new(session),
+            tokenizer: tok,
+            model_id: model_id.to_string(),
+            device_str: device.as_str(),
+            accepts_token_type_ids,
+        })
+    }
 }
 
 /// See ``rust/core/ner.rs::configure_intra_threads`` for rationale —

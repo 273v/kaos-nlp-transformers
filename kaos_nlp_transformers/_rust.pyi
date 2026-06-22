@@ -129,6 +129,14 @@ class reranker:
             device: str = "cpu",
             cache_dir: str | None = None,
         ) -> reranker.CrossEncoderBackend: ...
+        @staticmethod
+        def load_local(
+            local_path: str,
+            *,
+            device: str = "cpu",
+            max_seq_len: int = 512,
+            model_id: str = "local",
+        ) -> reranker.CrossEncoderBackend: ...
         def score(
             self,
             queries: list[str],

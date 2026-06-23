@@ -175,7 +175,7 @@ class PiiDetector:
                 cache_dir=cache_dir,
             )
         labels = list(backend.labels)
-        logger.info(
+        logger.debug(
             "Loaded PII detector %s @ %s on %s (%s) via ort (Rust); %d categories",
             registered.model_id,
             registered.revision,

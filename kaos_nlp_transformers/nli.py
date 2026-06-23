@@ -185,7 +185,7 @@ class NliModel:
                 device=device_info.device,
                 cache_dir=cache_dir,
             )
-        logger.info(
+        logger.debug(
             "Loaded NLI %s @ %s on %s (%s) via ort (Rust)",
             registered.model_id,
             registered.revision,

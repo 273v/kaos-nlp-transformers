@@ -299,7 +299,7 @@ class EmbeddingModel:
                 # truthful instead of inheriting whatever resolve_device
                 # picked from the system snapshot.
                 cpu_device = DeviceInfo(name="CPU", device="cpu", backend="model2vec")
-                logger.info(
+                logger.debug(
                     "Loaded %s @ %s via model2vec (static, CPU)",
                     registered.model_id,
                     registered.revision,
@@ -324,7 +324,7 @@ class EmbeddingModel:
                 device=device_info.device,
                 cache_dir=cache_dir,
             )
-            logger.info(
+            logger.debug(
                 "Loaded %s @ %s via ort (Rust) on %s",
                 registered.model_id,
                 registered.revision,
@@ -881,7 +881,7 @@ def _load_model2vec_cached(
     # 1. Vendored copy — try first, no network at all.
     vendored = _vendored_model_path(model_id)
     if vendored is not None:
-        logger.info(
+        logger.debug(
             "Loaded %s @ %s via model2vec from vendored path %s (audit-05 KNT-401)",
             model_id,
             revision,

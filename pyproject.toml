@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.8,<2.0"]
+requires = ["maturin>=1.8.2,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -131,7 +131,7 @@ Changelog = "https://github.com/273v/kaos-nlp-transformers/blob/main/CHANGELOG.m
 # pytest-benchmark is added for the perf-smoke gate (P5).
 dev = [
   "kaos-mcp>=0.1.0a1",
-  "maturin>=1.8,<2.0",
+  "maturin>=1.8.2,<2.0",
   "pytest>=9.0.3",
   "pytest-asyncio>=1.3.0",
   "pytest-benchmark>=5.1.0",

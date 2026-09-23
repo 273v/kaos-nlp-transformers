@@ -284,7 +284,7 @@ class ExtractiveRanker:
             mmr = nlp_core_mmr_select(embeddings, scores_f32, k=cap, lambda_=1.0 - diversify)
             order = [int(i) for i in mmr.indices]
         else:
-            order = list(np.argsort(-scores)[:cap])
+            order = [int(i) for i in np.argsort(-scores)[:cap]]
 
         results: list[ScoredSegment] = []
         for rank, index in enumerate(order):

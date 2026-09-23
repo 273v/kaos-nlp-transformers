@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.7] - 2026-09-22
+
+### Security
+
+- **Native extension rebuilt against patched Rust dependencies.** pyo3 and
+  rust-numpy 0.28 → 0.29 (RUSTSEC advisories for out-of-bounds reads in
+  `PyList`/`PyTuple` `nth`/`nth_back` and a missing `Sync` bound on
+  `PyCFunction::new_closure` closures), rustls 0.23.45 (TLS 1.3 handshake
+  messages accepted across encryption-level boundaries), crossbeam-epoch
+  0.9.21 and quinn-proto 0.11.18. `cargo audit` and `cargo deny check` are
+  clean. No public API change; the wheel stays `cp313-abi3`.
+
+### Changed
+
+- **`[mcp]` extra now requires `kaos-mcp>=0.1.5`.** Earlier kaos-mcp releases
+  allowed `mcp` 2.x, which removed `mcp.server.fastmcp` and broke import.
+
+### Dependencies
+
+- ort 2.0.0-rc.13, tokenizers 0.23.2 and the Python lock refresh from #63
+  (starlette, python-multipart, pyjwt, pydantic-settings, anyio,
+  cryptography, rpds-py with cp315 wheels).
+
 ## [0.1.6] - 2026-06-23
 
 ### Added

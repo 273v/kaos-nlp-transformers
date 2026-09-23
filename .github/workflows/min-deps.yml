@@ -42,7 +42,11 @@ jobs:
         run: uv sync --group dev --extra model2vec --resolution=lowest-direct --python 3.13
 
       - name: Build PyO3 extension
-        run: uv run maturin develop --release
+        # --no-sync is required: a plain `uv run` re-syncs the env to uv.lock
+        # (highest versions), silently undoing the lowest-direct install.
+        run: uv run --no-sync maturin develop --release
 
       - name: Run tests
-        run: uv run pytest -m "not live" --no-cov -q tests/
+        # --no-sync is required: a plain `uv run` re-syncs the env to uv.lock
+        # (highest versions), silently undoing the lowest-direct install.
+        run: uv run --no-sync pytest -m "not live" --no-cov -q tests/

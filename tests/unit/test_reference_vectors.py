@@ -36,6 +36,29 @@ def _sentences() -> list[str]:
     return [line.strip() for line in SENTENCES_PATH.read_text().splitlines() if line.strip()]
 
 
+_TRUTHY = ("1", "true", "yes", "on")
+
+
+def _skip_if_offline_and_uncached(model_id: str, revision: str, filename: str) -> None:
+    """Skip a ``live`` test that would need a download while offline.
+
+    Both the package flag and Hugging Face's own ``HF_HUB_OFFLINE`` count as offline.
+    A snapshot already in the local cache still runs, so a runner that pre-populates
+    its cache keeps exercising the test.
+    """
+    offline = any(
+        os.environ.get(var, "").lower() in _TRUTHY
+        for var in ("KAOS_NLP_TRANSFORMERS_OFFLINE", "HF_HUB_OFFLINE")
+    )
+    if not offline:
+        return
+    from huggingface_hub import try_to_load_from_cache
+
+    cached = try_to_load_from_cache(model_id, filename, revision=revision)
+    if not isinstance(cached, str):
+        pytest.skip(f"offline and {model_id}@{revision[:8]} is not in the local cache")
+
+
 def _load_ref(model_id: str) -> np.ndarray:
     npy = REFERENCE_DIR / f"{_slug(model_id)}.npy"
     if not npy.exists():
@@ -98,11 +121,10 @@ def test_potion_multilingual_matches_frozen():
     skipped) must reproduce the vectors frozen from a direct
     ``StaticModel`` load at the registry SHA."""
     pytest.importorskip("model2vec")
-    if os.environ.get("KAOS_NLP_TRANSFORMERS_OFFLINE", "").lower() in ("1", "true", "yes"):
-        pytest.skip("offline mode set")
-    from kaos_nlp_transformers import EmbeddingModel
+    from kaos_nlp_transformers import REGISTRY, EmbeddingModel
 
     model_id = "minishlab/potion-multilingual-128M"
+    _skip_if_offline_and_uncached(model_id, REGISTRY[model_id].revision, "model.safetensors")
     ref = _load_ref(model_id)
     em = EmbeddingModel.load(model_id)
     assert em.backend_name == "model2vec"

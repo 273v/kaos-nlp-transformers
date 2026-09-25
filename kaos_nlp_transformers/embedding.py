@@ -521,10 +521,20 @@ def _offline_env_scope(offline: bool) -> Iterator[None]:
         yield
         return
 
+    # huggingface_hub reads HF_HUB_OFFLINE once, at import, into
+    # ``huggingface_hub.constants.HF_HUB_OFFLINE`` (which ``is_offline_mode()``
+    # returns). Setting the env var alone therefore (a) does nothing if the hub is
+    # already imported, and (b) freezes offline mode for the whole process if the
+    # hub is first imported inside this scope. Import it before touching the env,
+    # then scope the module constant together with the env vars.
+    hub_constants = _hub_constants()
     snapshot = {var: os.environ.get(var) for var in _OFFLINE_ENV_VARS}
+    prior_constant = getattr(hub_constants, "HF_HUB_OFFLINE", None) if hub_constants else None
     try:
         for var in _OFFLINE_ENV_VARS:
             os.environ[var] = "1"
+        if hub_constants is not None:
+            hub_constants.HF_HUB_OFFLINE = True
         yield
     finally:
         for var, prior in snapshot.items():
@@ -532,6 +542,17 @@ def _offline_env_scope(offline: bool) -> Iterator[None]:
                 os.environ.pop(var, None)
             else:
                 os.environ[var] = prior
+        if hub_constants is not None and prior_constant is not None:
+            hub_constants.HF_HUB_OFFLINE = prior_constant
+
+
+def _hub_constants():
+    """``huggingface_hub.constants`` if importable, else ``None``."""
+    try:
+        from huggingface_hub import constants
+    except ImportError:
+        return None
+    return constants
 
 
 # ---------------------------------------------------------------------------

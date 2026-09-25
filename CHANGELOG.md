@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tests/unit/test_reference_vectors.py::test_potion_multilingual_matches_frozen`
+  (a `live` test) now skips when `HF_HUB_OFFLINE` is set and the pinned snapshot
+  is not cached, as well as under `KAOS_NLP_TRANSFORMERS_OFFLINE`. Release
+  pre-publish QA runs `tests/unit` without a marker filter on a runner with
+  `HF_HUB_OFFLINE` set, so the uncached model raised `ModelLoadError` and the
+  0.1.8 release job stopped before publishing. A cached snapshot still runs.
+
 ## [0.1.8] — 2026-09-25
 
 ### Added

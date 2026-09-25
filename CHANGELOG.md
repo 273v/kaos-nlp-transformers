@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] — 2026-09-25
+
+0.1.8 was tagged but never published (its release job stopped in pre-publish QA;
+see Fixed below). 0.1.9 ships the 0.1.8 changes, including the multilingual
+`minishlab/potion-multilingual-128M` registry entry.
+
 ### Fixed
 
 - `tests/unit/test_reference_vectors.py::test_potion_multilingual_matches_frozen`

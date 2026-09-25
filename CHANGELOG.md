@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] — 2026-09-25
+
 ### Added
 
 - **Multilingual static embedding model: `minishlab/potion-multilingual-128M`.**

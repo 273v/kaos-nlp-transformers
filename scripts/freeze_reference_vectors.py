@@ -79,7 +79,10 @@ def _freeze_model2vec(model_id: str, revision: str, sentences: list[str]) -> np.
         msg = "model2vec extra must be installed: uv sync --extra model2vec"
         raise SystemExit(msg) from exc
 
-    local_path = snapshot_download(repo_id=model_id, revision=revision, repo_type="model")
+    # Match the package loader: skip the duplicate ONNX export.
+    local_path = snapshot_download(
+        repo_id=model_id, revision=revision, repo_type="model", ignore_patterns=["onnx/*"]
+    )
     model = StaticModel.from_pretrained(local_path)
     arr = np.asarray(model.encode(sentences, show_progress_bar=False), dtype=np.float32)
     norms = np.linalg.norm(arr, axis=1, keepdims=True)
@@ -125,6 +128,7 @@ def main() -> None:
         ("minishlab/potion-retrieval-32M", "6fc8051fab2a1e0ee76689cf08c853792ac285e7"),
         ("minishlab/potion-base-8M", "bf8b056651a2c21b8d2565580b8569da283cab23"),
         ("minishlab/potion-base-32M", "1e5a03f8eeb2c98b928fbbd846f22f816360919f"),
+        ("minishlab/potion-multilingual-128M", "73908c3438cf03b6a01bcb9611d62b23d0726f08"),
     ]
     reranker_models: list[tuple[str, str]] = [
         ("BAAI/bge-reranker-base", "2cfc18c9415c912f9d8155881c133215df768a70"),

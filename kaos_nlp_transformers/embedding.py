@@ -840,6 +840,15 @@ def _vendored_model_path(model_id: str) -> Path | None:
     return None
 
 
+# model2vec repos on the Hub publish an ``onnx/model.onnx`` export beside
+# ``model.safetensors``. The two hold the same embedding matrix (~512 MB
+# each for potion-multilingual-128M, ~129 MB each for the 32M entries);
+# ``StaticModel.from_pretrained`` only reads config.json, model.safetensors
+# and tokenizer.json, so the ONNX duplicate is excluded from the pinned
+# snapshot download.
+_MODEL2VEC_IGNORE_PATTERNS: tuple[str, ...] = ("onnx/*",)
+
+
 @lru_cache(maxsize=8)
 def _load_model2vec_cached(
     model_id: str,
@@ -925,6 +934,7 @@ def _load_model2vec_cached(
             revision=revision,
             repo_type="model",
             cache_dir=cache_dir if cache_dir else None,
+            ignore_patterns=list(_MODEL2VEC_IGNORE_PATTERNS),
         )
         return StaticModel.from_pretrained(local_path)
     except Exception as exc:

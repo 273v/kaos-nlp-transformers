@@ -115,6 +115,92 @@ def test_potion_base_load_and_embed():
     np.testing.assert_allclose(np.linalg.norm(vecs, axis=1), 1.0, atol=1e-5)
 
 
+# -- potion-multilingual-128M ----------------------------------------------
+
+MULTILINGUAL_ID = "minishlab/potion-multilingual-128M"
+
+# Parallel sentences: row i of every language says the same thing.
+_PARALLEL = {
+    "en": [
+        "The weather is cold and it is raining today.",
+        "The children are playing football in the park.",
+        "The central bank raised interest rates by half a point.",
+    ],
+    "de": [
+        "Das Wetter ist kalt und es regnet heute.",
+        "Die Kinder spielen Fußball im Park.",
+        "Die Zentralbank hat die Zinsen um einen halben Prozentpunkt erhöht.",
+    ],
+    "ru": [
+        "Сегодня холодно и идёт дождь.",
+        "Дети играют в футбол в парке.",
+        "Центральный банк повысил процентные ставки на полпункта.",
+    ],
+    "zh": [
+        "今天天气很冷，还在下雨。",  # noqa: RUF001 - CJK fullwidth comma is intended
+        "孩子们在公园里踢足球。",
+        "央行将利率上调了半个百分点。",
+    ],
+}
+
+
+def test_potion_multilingual_load_and_embed():
+    """Real download + encode contract for the multilingual static model,
+    through the same model2vec backend path as the English entries."""
+    _skip_if_no_model2vec()
+    _skip_if_offline()
+    from kaos_nlp_transformers import EmbeddingModel
+
+    model = EmbeddingModel.load(MULTILINGUAL_ID)
+    assert model.backend_name == "model2vec"
+    assert model.dim == 256
+    assert model.device is not None
+    assert model.device.device == "cpu"
+
+    texts = [
+        "hello world",
+        "Straße in São Paulo",
+        "İstanbul'da bir gün",
+        "東京の天気",
+        "emoji 🚀 text",
+    ]
+    vecs = model.embed(texts)
+    assert vecs.shape == (len(texts), 256)
+    assert vecs.dtype == np.float32
+    np.testing.assert_allclose(np.linalg.norm(vecs, axis=1), 1.0, atol=1e-5)
+
+    empty = model.embed([])
+    assert empty.shape == (0, 256)
+    assert empty.dtype == np.float32
+
+
+def test_potion_multilingual_cross_lingual_alignment():
+    """Quality smoke: a sentence must be closer to its own translation than
+    to any other sentence in the translated set, and translated pairs must
+    score well above unrelated pairs on average. The English-only entries
+    fail this (see the registry notes); it catches a multilingual entry
+    that loads but does not align languages. Not a benchmark."""
+    _skip_if_no_model2vec()
+    _skip_if_offline()
+    from kaos_nlp_transformers import EmbeddingModel
+
+    model = EmbeddingModel.load(MULTILINGUAL_ID)
+    en = model.embed(_PARALLEL["en"])
+    n = len(_PARALLEL["en"])
+    off_diag = ~np.eye(n, dtype=bool)
+    for lang in ("de", "ru", "zh"):
+        other = model.embed(_PARALLEL[lang])
+        sims = en @ other.T
+        assert (sims.argmax(axis=1) == np.arange(n)).all(), (
+            f"en-{lang} top-1 mismatch: {sims.round(3).tolist()}"
+        )
+        translated = float(np.diag(sims).mean())
+        unrelated = float(sims[off_diag].mean())
+        assert translated > unrelated + 0.25, (
+            f"en-{lang}: translated={translated:.3f} unrelated={unrelated:.3f}"
+        )
+
+
 # -- empty-input contract --------------------------------------------------
 
 

@@ -138,3 +138,53 @@ def test_load_model2vec_cached_missing_dep_raises_friendly_error(monkeypatch):
     assert "Alternative" in msg
     # Reset the cache so subsequent tests get a fresh slate.
     _load_model2vec_cached.cache_clear()
+
+
+def test_load_model2vec_cached_skips_onnx_export(monkeypatch, tmp_path):
+    """model2vec repos on the Hub ship an ``onnx/model.onnx`` export next
+    to ``model.safetensors``; the two are the same size (~512 MB each for
+    the multilingual 128M entry). The model2vec backend only reads the
+    safetensors + tokenizer + config, so the pinned snapshot download must
+    not fetch the ONNX duplicate. The revision pin must still be passed."""
+    import sys
+    import types
+
+    pytest.importorskip("model2vec")
+    import huggingface_hub
+
+    from kaos_nlp_transformers.embedding import _load_model2vec_cached
+
+    calls: list[dict] = []
+
+    def fake_snapshot_download(**kwargs):
+        calls.append(kwargs)
+        return str(tmp_path)
+
+    loaded: list[str] = []
+
+    class FakeStaticModel:
+        @classmethod
+        def from_pretrained(cls, path):
+            loaded.append(path)
+            return cls()
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
+    fake_m2v = types.ModuleType("model2vec")
+    fake_m2v.StaticModel = FakeStaticModel  # ty: ignore[unresolved-attribute]
+    monkeypatch.setitem(sys.modules, "model2vec", fake_m2v)
+    _load_model2vec_cached.cache_clear()
+    try:
+        _load_model2vec_cached(
+            model_id="minishlab/potion-multilingual-128M",
+            revision="73908c3438cf03b6a01bcb9611d62b23d0726f08",
+            cache_dir=None,
+        )
+    finally:
+        _load_model2vec_cached.cache_clear()
+
+    assert len(calls) == 1
+    kwargs = calls[0]
+    assert kwargs["repo_id"] == "minishlab/potion-multilingual-128M"
+    assert kwargs["revision"] == "73908c3438cf03b6a01bcb9611d62b23d0726f08"
+    assert "onnx/*" in kwargs.get("ignore_patterns", [])
+    assert loaded == [str(tmp_path)]

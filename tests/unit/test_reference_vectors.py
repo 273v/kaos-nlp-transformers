@@ -92,6 +92,27 @@ def test_bge_small_rust_matches_frozen():
     )
 
 
+@pytest.mark.live
+def test_potion_multilingual_matches_frozen():
+    """The package's model2vec load path (pinned snapshot, ONNX export
+    skipped) must reproduce the vectors frozen from a direct
+    ``StaticModel`` load at the registry SHA."""
+    pytest.importorskip("model2vec")
+    if os.environ.get("KAOS_NLP_TRANSFORMERS_OFFLINE", "").lower() in ("1", "true", "yes"):
+        pytest.skip("offline mode set")
+    from kaos_nlp_transformers import EmbeddingModel
+
+    model_id = "minishlab/potion-multilingual-128M"
+    ref = _load_ref(model_id)
+    em = EmbeddingModel.load(model_id)
+    assert em.backend_name == "model2vec"
+    out = em.embed(_sentences())
+    assert out.shape == ref.shape
+    assert out.dtype == np.float32
+    sims = np.einsum("ij,ij->i", out, ref)
+    assert float(sims.min()) >= 0.9999, f"all sims={sims.tolist()}"
+
+
 def test_reference_npys_present():
     """The frozen reference NPYs must be committed to the tree.
     This test runs offline — fails if scripts/freeze_reference_vectors.py
@@ -101,6 +122,7 @@ def test_reference_npys_present():
         "minishlab_potion_retrieval_32m.npy",
         "minishlab_potion_base_8m.npy",
         "minishlab_potion_base_32m.npy",
+        "minishlab_potion_multilingual_128m.npy",
         "baai_bge_reranker_base.npy",
     ]
     for name in expected:

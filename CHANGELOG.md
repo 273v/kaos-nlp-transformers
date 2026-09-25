@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Added
+
+- **Multilingual static embedding model: `minishlab/potion-multilingual-128M`.**
+  Every previously registered embedding model was English-only
+  (`BAAI/bge-small-en-v1.5` and the `potion-*` distillations of
+  `bge-base-en-v1.5`), so non-English text had no registry entry that could
+  embed it meaningfully. The new entry is a model2vec static distillation of
+  `BAAI/bge-m3` (MIT, 101 languages, 256-dim, pinned at
+  `73908c3438cf03b6a01bcb9611d62b23d0726f08`) and loads through the existing
+  `[model2vec]` backend. Sanity check on 6 English sentences and their
+  translations into 8 languages: mean cosine 0.637 for translated pairs vs
+  0.102 for unrelated pairs with 48/48 correct top-1 cross-lingual matches
+  (`potion-base-32M`: 0.083 vs 0.008, 27/48). Not the default model.
+
+### Changed
+
+- **model2vec snapshot downloads skip the `onnx/` export.** model2vec repos
+  on the Hub ship `onnx/model.onnx` beside `model.safetensors` with the same
+  size; the model2vec backend never reads it. Skipping it halves the first
+  download (~512 MB saved for `potion-multilingual-128M`, ~129 MB for the
+  32M entries). The revision pin is unchanged.
+
 ## [0.1.7] - 2026-09-22
 
 ### Security

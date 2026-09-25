@@ -58,6 +58,13 @@ class RegisteredModel:
 #    docs, high-throughput dedup/clustering. Pair with a cross-encoder
 #    reranker for final-pass quality.
 #
+# Language coverage: bge-small-en-v1.5 and the potion-base / potion-retrieval
+# entries (distilled from bge-base-en-v1.5, English WordPiece vocabulary) are
+# English-only; non-English text tokenizes into sub-word fragments that carry
+# little meaning. ``minishlab/potion-multilingual-128M`` (distilled from
+# BAAI/bge-m3, XLM-R vocabulary, 101 languages) is the registered choice for
+# non-English and mixed-language input.
+#
 # Audit-06 KNT-501 (0.1.0a6): the third "sentence-transformers" backend
 # was retired. fastembed.TextCrossEncoder now serves the cross-encoder
 # reranker via the same ONNX runtime as embedding does, so torch is no
@@ -130,6 +137,31 @@ REGISTRY: dict[str, RegisteredModel] = {
             "classification / dedup / clustering; for retrieval pick "
             "potion-retrieval-32M instead. Verified 2026-05-08. Requires the "
             "[model2vec] extra."
+        ),
+    ),
+    "minishlab/potion-multilingual-128M": RegisteredModel(
+        model_id="minishlab/potion-multilingual-128M",
+        revision="73908c3438cf03b6a01bcb9611d62b23d0726f08",
+        license="MIT",
+        # ~500K-token bge-m3 (XLM-R) vocabulary x 256 dims = ~128M
+        # parameters; ``hidden_dim: 256`` in the snapshot's config.json.
+        # Distilled from BAAI/bge-m3 (MIT) and Tokenlearn-trained on
+        # multilingual C4 (ODC-BY). ~512 MB safetensors + ~19 MB
+        # tokenizer; the loader skips the duplicate ~512 MB ONNX export.
+        params_m=128,
+        dim=256,
+        backend="model2vec",
+        notes=(
+            "Multilingual static distillation of BAAI/bge-m3 (101 languages, "
+            "XLM-R tokenizer), 256-dim. The registered choice for non-English "
+            "or mixed-language text; the other embedding entries are "
+            "English-only. Upstream MTEB multilingual mean 47.31 (~91% of "
+            "LaBSE). Measured 2026-09-25 on 6 English sentences x 8 "
+            "translations (de/fr/es/pt/ru/zh/ja/ar): mean cosine 0.637 for "
+            "translated pairs vs 0.102 for unrelated pairs, 48/48 correct "
+            "top-1 cross-lingual matches (potion-base-32M: 0.083 vs 0.008, "
+            "27/48; bge-small-en-v1.5: 0.508 vs 0.440, 27/48). ~530 MB "
+            "download. Verified 2026-09-25. Requires the [model2vec] extra."
         ),
     ),
 }

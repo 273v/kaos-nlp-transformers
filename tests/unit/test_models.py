@@ -115,3 +115,47 @@ def test_model2vec_entries_present():
         assert entry.license == "MIT"
         assert entry.dim == 512
         assert entry.params_m == 32
+
+
+# Multilingual static embedding entry ------------------------------------
+
+
+MULTILINGUAL_STATIC_ID = "minishlab/potion-multilingual-128M"
+
+
+def test_registry_has_a_multilingual_embedding_model():
+    """Every other embedding entry is English-only (bge-small-en and the
+    potion-* distillations of bge-base-en), so non-English input had no
+    registered model that could embed it meaningfully. At least one entry
+    must be multilingual."""
+    from kaos_nlp_transformers.models import REGISTRY
+
+    assert MULTILINGUAL_STATIC_ID in REGISTRY, (
+        "no multilingual embedding model registered; non-English text has "
+        "no suitable registry entry"
+    )
+
+
+def test_multilingual_static_entry_contract():
+    """Pin the registry facts that were verified against the Hub: MIT
+    license, model2vec static backend, 256-dim vectors (``hidden_dim`` in
+    the snapshot's config.json), ~128M parameters (a ~500K-token bge-m3
+    vocabulary x 256 dims)."""
+    from kaos_nlp_transformers.models import REGISTRY
+
+    entry = REGISTRY[MULTILINGUAL_STATIC_ID]
+    assert entry.model_id == MULTILINGUAL_STATIC_ID
+    assert entry.revision == "73908c3438cf03b6a01bcb9611d62b23d0726f08"
+    assert entry.backend == "model2vec"
+    assert entry.license == "MIT"
+    assert entry.dim == 256
+    assert entry.params_m == 128
+    assert "multilingual" in entry.notes.lower()
+    assert "[model2vec] extra" in entry.notes
+
+
+def test_multilingual_static_entry_is_not_the_default():
+    """Adding a model must not change which model loads by default."""
+    from kaos_nlp_transformers.settings import KaosNLPTransformersSettings
+
+    assert KaosNLPTransformersSettings().default_model == "BAAI/bge-small-en-v1.5"

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] — 2026-09-25
+
+0.1.8 and 0.1.9 were tagged but never published: both release jobs stopped in
+pre-publish QA on the offline-mode leak fixed below. 0.1.10 ships everything
+listed under 0.1.8 and 0.1.9, including the multilingual
+`minishlab/potion-multilingual-128M` registry entry.
+
 ### Fixed
 
 - Per-call offline mode (`settings.offline`, KNT-103) no longer leaks across

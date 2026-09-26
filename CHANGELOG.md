@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Per-call offline mode (`settings.offline`, KNT-103) no longer leaks across
+  `load()` calls. huggingface_hub reads `HF_HUB_OFFLINE` once, at import, into
+  `huggingface_hub.constants.HF_HUB_OFFLINE`; `_offline_env_scope` only set the
+  env var, so a first hub import inside an offline load froze offline mode for
+  the rest of the process (later online loads raised `OfflineModeIsEnabled`),
+  and an offline load after the hub was already imported was not actually
+  offline. The scope now imports the hub before touching the env and scopes the
+  module constant with the env vars, restoring both on exit or error.
+
 ## [0.1.9] — 2026-09-25
 
 0.1.8 was tagged but never published (its release job stopped in pre-publish QA;
